@@ -3,23 +3,27 @@ package handlers
 import (
 	"fmt"
 
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
+	mys3 "github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
 	"github.com/gofiber/fiber/v2"
 )
 
 type UploadHandler struct {
-	S3Service *s3.Service
+	S3Service  *mys3.Service
+	JobHandler *JobHandler // abstracting the sqs handler
 }
 
-func NewUploadHandler(s3Service *s3.Service) *UploadHandler {
-	return &UploadHandler{S3Service: s3Service}
+func NewUploadHandler(s3Service *mys3.Service, jobHandler *JobHandler) *UploadHandler {
+	return &UploadHandler{
+		S3Service:  s3Service,
+		JobHandler: jobHandler,
+	}
 }
 
 func (h *UploadHandler) GeneratePresignedURL(c *fiber.Ctx) error {
 
 	context := fiber.Map{
-		"msg:": "PresignedURL generated",
+		"msg": "PresignedURL generated",
 	}
 
 	var metadata models.VideoMetadata
@@ -42,10 +46,10 @@ func (h *UploadHandler) GeneratePresignedURL(c *fiber.Ctx) error {
 	}
 	fmt.Println("Presigned URL: ", url)
 	context["url"] = url
+	context["key"] = metadata.Name
 
 	return c.Status(200).JSON(context)
 }
-
 func validateMetadata(metadata models.VideoMetadata) *fiber.Error {
 	allowedTypes := map[string]bool{
 		"video/mp4": true,
@@ -61,4 +65,28 @@ func validateMetadata(metadata models.VideoMetadata) *fiber.Error {
 	}
 
 	return nil
+}
+
+func (h *UploadHandler) NotifyUpload(c *fiber.Ctx) error {
+	context := fiber.Map{
+		"msg": "Service Notified",
+	}
+
+	var data models.NotifyData
+
+	if err := c.BodyParser(&data); err != nil {
+		context["msg"] = "Error parsing request body"
+		return c.Status(400).JSON(context)
+	}
+
+	// push an entry into sqs regarding the s3 upload
+	err := h.JobHandler.PutInQueue(c.Context(), data)
+	if err != nil {
+		context["msg"] = "Error adding to sqs"
+		return c.Status(400).JSON(context)
+	}
+
+	// fmt.Println("notify data: ", data.Key)
+
+	return c.Status(200).JSON(context)
 }

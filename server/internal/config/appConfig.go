@@ -2,13 +2,14 @@ package config
 
 import "os"
 
-// this is application config, not the aws user config
 type AppConfig struct {
 	BucketName string
+	QueueURL   string
 }
 
-func Load() *AppConfig {
+func LoadApp() *AppConfig {
 	return &AppConfig{
 		BucketName: os.Getenv("BUCKET_NAME"),
+		QueueURL:   os.Getenv("QUEUE_URL"),
 	}
 }

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import Button from './components/UploadBtn'
-import { generatePresignedURL, uploadToS3 } from './helpers/s3'
+import { generatePresignedURL, notifyUploadComplete, uploadToS3 } from './helpers/s3'
 
 const allowedTypes = {
   'video/mp4': true,
@@ -62,9 +62,10 @@ const App = () => {
     }
 
     try {
-      const { url } = await generatePresignedURL(videoMetadata)
+      const { url, key } = await generatePresignedURL(videoMetadata)
       await uploadToS3(url, selectedFile, videoMetadata.type)
-      console.log('Upload successful')
+      // make a call to backend to notify that upload is complete, so info can be pushed to sqs
+      await notifyUploadComplete(key)
     } catch (err) {
       console.error('Upload failed:', err)
       alert('Upload failed: ' + err.message)

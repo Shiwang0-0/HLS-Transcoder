@@ -37,3 +37,31 @@ export const uploadToS3 = async(presignedURL, file, fileType)=>{
 
     return response
 }
+
+export const notifyUploadComplete = async(key)=>{
+    try{
+        const payload={
+            key
+        }
+
+        const response = await fetch('http://localhost:8000/api/notify-upload',{
+            method:'POST',
+            headers:{
+                'Content-Type':'application/json'
+            },
+            body:JSON.stringify(payload)
+        })
+
+        if(!response.ok){
+                const errorData = await response.json()
+                console.log(errorData)
+
+                throw new Error(errorData.error || "Unknown error")
+            }
+
+        const data = await response.json()
+        return data
+    }catch(err){
+        console.log(err)
+    }
+}

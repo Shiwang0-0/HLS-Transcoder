@@ -9,3 +9,7 @@ type VideoMetadata struct {
 	Height       int     `json:"height"`
 	LastModified int64   `json:"lastModified"`
 }
+
+type NotifyData struct {
+	Key string `json:"key"`
+}
