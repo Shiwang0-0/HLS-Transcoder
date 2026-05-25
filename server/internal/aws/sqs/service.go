@@ -32,3 +32,14 @@ func (s *Service) PutInQueue(ctx context.Context, data models.NotifyData) error 
 
 	return nil
 }
+
+func (s *Service) PollSQS(ctx context.Context) (*sqs.ReceiveMessageOutput, error) {
+	return s.Client.ReceiveMessage(
+		ctx,
+		&sqs.ReceiveMessageInput{
+			QueueUrl:            &s.QueueURL,
+			MaxNumberOfMessages: 10,
+			WaitTimeSeconds:     20,
+		},
+	)
+}

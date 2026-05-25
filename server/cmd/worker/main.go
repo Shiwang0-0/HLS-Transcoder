@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/sqs"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/config"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/worker"
@@ -27,7 +28,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// s3Client := s3.NewS3Client(awsConfig)
+	s3Client := s3.NewS3Client(awsConfig)
 	sqsClient := sqs.NewSQSClient(awsConfig)
 
 	if err != nil {
@@ -35,8 +36,10 @@ func main() {
 	}
 
 	// initialize services
-	// s3Service := s3.NewService(s3Client, appConfig.BucketName)
+	s3Service := s3.NewService(s3Client, appConfig.BucketName)
 	sqsService := sqs.NewService(sqsClient, appConfig.QueueURL)
 
-	worker.PollSQS(ctx, sqsService)
+	w := worker.NewWorker(s3Service, sqsService)
+
+	w.Start(ctx) // start polling
 }
