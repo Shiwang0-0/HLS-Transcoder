@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -43,7 +44,7 @@ func (w *Worker) Start(ctx context.Context) {
 			continue
 		}
 
-		for _, msg := range result.Messages {
+		for _, msg := range result.Messages { // for every video
 			var payload models.NotifyData
 
 			err := json.Unmarshal(
@@ -61,7 +62,7 @@ func (w *Worker) Start(ctx context.Context) {
 			// for every objectKey, get it from S3
 			downloadCtx, cancel := context.WithTimeout(ctx, time.Second*60)
 			localPath, err := w.S3Service.DownloadFile(downloadCtx, objectKey)
-
+			fmt.Println("Local path: ", localPath)
 			cancel()
 
 			if err != nil {
@@ -69,7 +70,7 @@ func (w *Worker) Start(ctx context.Context) {
 				continue
 			}
 
-			err = ffmpeg.GenerateTranscoding(localPath)
+			outputDir, videoID, err := ffmpeg.GenerateTranscoding(localPath)
 
 			if err != nil {
 				log.Print(err)
@@ -83,6 +84,9 @@ func (w *Worker) Start(ctx context.Context) {
 				log.Println(err)
 				continue
 			}
+
+			HLSKeyPrefix := "hls/" + videoID // for S3
+			w.S3Service.UploadDirectory(ctx, outputDir, HLSKeyPrefix)
 		}
 	}
 }

@@ -12,7 +12,11 @@ type Pair struct {
 	Bitrate    string
 }
 
-func GenerateTranscoding(inputPath string) error {
+func GenerateTranscoding(inputPath string) (string, string, error) {
+
+	videoID := filepath.Base(filepath.Dir(inputPath))
+
+	outputRoot := filepath.Join("media/output", videoID)
 
 	variants := []Pair{
 		{"1080", "5000k"},
@@ -21,26 +25,20 @@ func GenerateTranscoding(inputPath string) error {
 	}
 
 	for _, variant := range variants {
-		err := GenerateVariant(inputPath, variant.Resolution, variant.Bitrate)
+		err := GenerateVariant(inputPath, outputRoot, variant.Resolution, variant.Bitrate)
 
 		if err != nil {
-			return err
+			return "", "", err
 		}
 	}
-	return nil
+	return outputRoot, videoID, nil
 }
 
-func GenerateVariant(inputPath string, resolution string, bitrate string) error {
+func GenerateVariant(inputPath string, outputRoot string, resolution string, bitrate string) error {
 
 	// media/uploads/uuid/video.mp4
 
-	baseDir := filepath.Dir(inputPath)
-
-	// 720p / 1080p / 480p
-	outputDir := filepath.Join(
-		baseDir,
-		resolution,
-	)
+	outputDir := filepath.Join(outputRoot, resolution)
 
 	err := os.MkdirAll(outputDir, os.ModePerm)
 	if err != nil {
@@ -48,7 +46,6 @@ func GenerateVariant(inputPath string, resolution string, bitrate string) error 
 	}
 
 	hlsPath := filepath.Join(outputDir, "index.m3u8")
-
 	segmentPath := filepath.Join(outputDir, "segment%03d.ts")
 
 	scale := fmt.Sprintf("scale=-2:%s", resolution)

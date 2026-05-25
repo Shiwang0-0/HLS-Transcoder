@@ -36,7 +36,7 @@ func (s *Service) GeneratePresignedURL(ctx context.Context, metaData models.Vide
 	videoID := uuid.NewString()
 
 	objectKey := fmt.Sprintf(
-		"uploads/%s/%s",
+		"input/%s/%s",
 		videoID,
 		metaData.Name,
 	)
@@ -93,4 +93,39 @@ func (s *Service) DownloadFile(ctx context.Context, objectKey string) (string, e
 	defer file.Close()
 	_, err = io.Copy(file, result.Body)
 	return localPath, err
+}
+
+func (s *Service) UploadDirectory(ctx context.Context, localPath string, HLSKeyPrefix string) error {
+	// recursive go into the folders
+	return filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
+		// only upload files, so skip directories
+		if d.IsDir() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		relPath, err := filepath.Rel(localPath, path) // based on localPath and currentPath get the relative path becuase S3 will include this relative path as the object key
+		// converts media/uploads/abc123/720/segment000.ts to segment000.ts
+
+		s3Key := HLSKeyPrefix + "/" + filepath.ToSlash(relPath)
+
+		_, err = s.Client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket: &s.BucketName,
+			Key:    &s3Key,
+			Body:   file,
+		})
+
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("Uploaded:", s3Key)
+
+		return nil
+	})
 }
