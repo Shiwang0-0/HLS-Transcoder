@@ -2,10 +2,14 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/sqs"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/ffmpeg"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
 )
 
 type Worker struct {
@@ -40,13 +44,45 @@ func (w *Worker) Start(ctx context.Context) {
 		}
 
 		for _, msg := range result.Messages {
-			objectKey := *msg.Body
+			var payload models.NotifyData
+
+			err := json.Unmarshal(
+				[]byte(*msg.Body),
+				&payload,
+			)
+
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			objectKey := payload.Key
 
 			// for every objectKey, get it from S3
 			downloadCtx, cancel := context.WithTimeout(ctx, time.Second*60)
-			w.S3Service.DownloadFile(downloadCtx, objectKey)
+			localPath, err := w.S3Service.DownloadFile(downloadCtx, objectKey)
 
 			cancel()
+
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			err = ffmpeg.GenerateTranscoding(localPath)
+
+			if err != nil {
+				log.Print(err)
+				continue
+			}
+
+			// delete after successful processing
+			err = w.SqsService.DeleteMessage(ctx, *msg.ReceiptHandle)
+
+			if err != nil {
+				log.Println(err)
+				continue
+			}
 		}
 	}
 }

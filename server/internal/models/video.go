@@ -13,3 +13,8 @@ type VideoMetadata struct {
 type NotifyData struct {
 	Key string `json:"key"`
 }
+
+type PresignedURLResponse struct {
+	URL string `json:"url"`
+	Key string `json:"key"`
+}

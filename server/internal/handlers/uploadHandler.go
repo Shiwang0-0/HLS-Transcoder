@@ -39,14 +39,14 @@ func (h *UploadHandler) GeneratePresignedURL(c *fiber.Ctx) error {
 		return c.Status(400).JSON(context)
 	}
 
-	url, err := h.S3Service.GeneratePresignedURL(c.Context(), metadata)
+	response, err := h.S3Service.GeneratePresignedURL(c.Context(), metadata)
 	if err != nil {
 		context["msg"] = "Error generating Presigned url"
 		return c.Status(400).JSON(context)
 	}
-	fmt.Println("Presigned URL: ", url)
-	context["url"] = url
-	context["key"] = metadata.Name
+	fmt.Println("Presigned URL: ", response.URL)
+	context["url"] = response.URL
+	context["key"] = response.Key
 
 	return c.Status(200).JSON(context)
 }

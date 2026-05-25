@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/google/uuid"
 )
 
 type Service struct {
@@ -27,22 +29,34 @@ func NewService(s3Client *s3.Client, bucketName string) *Service {
 	}
 }
 
-func (s *Service) GeneratePresignedURL(ctx context.Context, metaData models.VideoMetadata) (string, error) {
+func (s *Service) GeneratePresignedURL(ctx context.Context, metaData models.VideoMetadata) (*models.PresignedURLResponse, error) {
 	presignClient := s3.NewPresignClient(s.Client)
+
+	// for every video to be identified as uniue, add uuid in the objectKey
+	videoID := uuid.NewString()
+
+	objectKey := fmt.Sprintf(
+		"uploads/%s/%s",
+		videoID,
+		metaData.Name,
+	)
 
 	req, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.BucketName),
-		Key:         aws.String(metaData.Name),
+		Key:         aws.String(objectKey),
 		ContentType: aws.String(metaData.Type),
 	}, s3.WithPresignExpires(2*time.Minute))
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return req.URL, nil
+	return &models.PresignedURLResponse{
+		URL: req.URL,
+		Key: objectKey,
+	}, nil
 }
 
-func (s *Service) DownloadFile(ctx context.Context, objectKey string) error {
+func (s *Service) DownloadFile(ctx context.Context, objectKey string) (string, error) {
 	result, err := s.Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.BucketName),
 		Key:    aws.String(objectKey),
@@ -56,27 +70,27 @@ func (s *Service) DownloadFile(ctx context.Context, objectKey string) error {
 		} else {
 			log.Printf("Couldn't get object %v:%v. Here's why: %v\n", s.BucketName, objectKey, err)
 		}
-		return err
+		return "", err
 	}
 	defer result.Body.Close()
 
-	dir := "./media"
+	localPath := filepath.Join("media", objectKey)
 
-	// create directory if not exists
-	err = os.MkdirAll(dir, os.ModePerm)
+	parentDir := filepath.Dir(localPath)
+
+	err = os.MkdirAll(parentDir, os.ModePerm)
 	if err != nil {
-		log.Printf("Couldn't create directory %v. Here's why: %v\n", dir, err)
-		return err
+		log.Printf("couldn't create directory %v, error: %v\n", parentDir, err)
+		return "", err
 	}
 
-	fileName := filepath.Join(dir, objectKey)
 	// save file
-	file, err := os.Create(fileName)
+	file, err := os.Create(localPath)
 	if err != nil {
-		log.Printf("Couldn't create file %v. Here's why: %v\n", fileName, err)
-		return err
+		log.Printf("Couldn't create file %v. Here's why: %v\n", localPath, err)
+		return "", err
 	}
 	defer file.Close()
 	_, err = io.Copy(file, result.Body)
-	return err
+	return localPath, err
 }
