@@ -47,6 +47,8 @@ func (h *UploadHandler) GeneratePresignedURL(c *fiber.Ctx) error {
 	fmt.Println("Presigned URL: ", response.URL)
 	context["url"] = response.URL
 	context["key"] = response.Key
+	context["videoID"] = response.VideoID
+	context["jobID"] = response.JobID
 
 	return c.Status(200).JSON(context)
 }

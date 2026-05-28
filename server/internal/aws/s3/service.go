@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
@@ -32,9 +33,11 @@ func NewService(s3Client *s3.Client, bucketName string) *Service {
 func (s *Service) GeneratePresignedURL(ctx context.Context, metaData models.VideoMetadata) (*models.PresignedURLResponse, error) {
 	presignClient := s3.NewPresignClient(s.Client)
 
-	// for every video to be identified as uniue, add uuid in the objectKey
-	videoID := uuid.NewString()
+	// for every video to be identified as unique, add uuid in the objectKey
+	videoID := uuid.New().String()
+	jobID := uuid.New().String()
 
+	// objectKey is only of videoId
 	objectKey := fmt.Sprintf(
 		"input/%s/%s",
 		videoID,
@@ -51,13 +54,36 @@ func (s *Service) GeneratePresignedURL(ctx context.Context, metaData models.Vide
 		return nil, err
 	}
 	return &models.PresignedURLResponse{
-		URL: req.URL,
-		Key: objectKey,
+		URL:     req.URL,
+		Key:     objectKey,
+		VideoID: videoID,
+		JobID:   jobID,
 	}, nil
 }
 
 func (s *Service) DownloadFile(ctx context.Context, objectKey string) (string, error) {
-	result, err := s.Client.GetObject(ctx, &s3.GetObjectInput{
+
+	// based on the size of the object that is on head, calculate the timeOutSeconds
+	headResult, err := s.Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &s.BucketName,
+		Key:    aws.String(objectKey),
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	fileSizeBytes := *headResult.ContentLength
+	// assuming minimum 5 MB/s download speed, add 60s buffer
+	timeoutSeconds := (fileSizeBytes / 1024 / 1024 / 5) + 60
+	if timeoutSeconds < 60 {
+		timeoutSeconds = 60
+	}
+
+	downloadCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	result, err := s.Client.GetObject(downloadCtx, &s3.GetObjectInput{
 		Bucket: aws.String(s.BucketName),
 		Key:    aws.String(objectKey),
 	})
@@ -98,34 +124,50 @@ func (s *Service) DownloadFile(ctx context.Context, objectKey string) (string, e
 func (s *Service) UploadDirectory(ctx context.Context, localPath string, HLSKeyPrefix string) error {
 	// recursive go into the folders
 	return filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err // propagate WalkDir errors
+		}
 		// only upload files, so skip directories
 		if d.IsDir() {
 			return nil
 		}
 
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		relPath, err := filepath.Rel(localPath, path) // based on localPath and currentPath get the relative path becuase S3 will include this relative path as the object key
+		// based on localPath and currentPath get the relative path becuase S3 will include this relative path as the object key
 		// converts media/uploads/abc123/720/segment000.ts to segment000.ts
+		relPath, err := filepath.Rel(localPath, path)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path for %s: %w", path, err)
+		}
 
 		s3Key := HLSKeyPrefix + "/" + filepath.ToSlash(relPath)
 
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open file %s: %w", path, err)
+		}
+		defer file.Close()
+
+		contentType := "application/octet-stream"
+
+		if strings.HasSuffix(path, ".m3u8") {
+			contentType = "application/vnd.apple.mpegurl"
+		}
+
+		if strings.HasSuffix(path, ".ts") {
+			contentType = "video/mp2t"
+		}
 		_, err = s.Client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket: &s.BucketName,
-			Key:    &s3Key,
-			Body:   file,
+			Bucket:      &s.BucketName,
+			Key:         &s3Key,
+			Body:        file,
+			ContentType: aws.String(contentType),
 		})
 
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to upload %s: %w", s3Key, err)
 		}
 
 		fmt.Println("Uploaded:", s3Key)
-
 		return nil
 	})
 }

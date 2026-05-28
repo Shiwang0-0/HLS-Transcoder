@@ -11,10 +11,23 @@ type VideoMetadata struct {
 }
 
 type NotifyData struct {
-	Key string `json:"key"`
+	Key     string `json:"key"`
+	JobID   string `json:"jobID"`
+	VideoID string `json:"videoID"`
 }
 
 type PresignedURLResponse struct {
-	URL string `json:"url"`
-	Key string `json:"key"`
+	URL     string `json:"url"`
+	Key     string `json:"key"`
+	VideoID string `json:"videoID"`
+	JobID   string `json:"jobID"`
+}
+
+type JobStatus struct {
+	JobID    string `json:"jobId"`
+	Status   string `json:"status"` // uploading | queued | processing | completed | failed
+	Stage    string `json:"stage"`  // s3_upload | ffmpeg | done
+	Progress int    `json:"progress"`
+	Key      string `json:"key"`
+	Error    string `json:"error,omitempty"`
 }

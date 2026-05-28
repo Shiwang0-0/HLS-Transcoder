@@ -12,9 +12,7 @@ type Pair struct {
 	Bitrate    string
 }
 
-func GenerateTranscoding(inputPath string) (string, string, error) {
-
-	videoID := filepath.Base(filepath.Dir(inputPath))
+func GenerateTranscoding(inputPath string, videoID string) (string, error) {
 
 	outputRoot := filepath.Join("media/output", videoID)
 
@@ -28,10 +26,15 @@ func GenerateTranscoding(inputPath string) (string, string, error) {
 		err := GenerateVariant(inputPath, outputRoot, variant.Resolution, variant.Bitrate)
 
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 	}
-	return outputRoot, videoID, nil
+
+	err := GenerateMasterPlaylist(outputRoot, videoID)
+	if err != nil {
+		return "", err
+	}
+	return outputRoot, nil
 }
 
 func GenerateVariant(inputPath string, outputRoot string, resolution string, bitrate string) error {
@@ -89,4 +92,21 @@ func GenerateVariant(inputPath string, outputRoot string, resolution string, bit
 	fmt.Printf("%sp transcoding completed\n", resolution)
 
 	return nil
+}
+
+// adaptive change
+func GenerateMasterPlaylist(outputRoot, videoID string) error {
+
+	filePath := filepath.Join(outputRoot, "master.m3u8")
+
+	content := "#EXTM3U\n" +
+		"#EXT-X-VERSION:3\n\n" +
+		"#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\n" +
+		"1080/index.m3u8\n\n" +
+		"#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720\n" +
+		"720/index.m3u8\n\n" +
+		"#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=854x480\n" +
+		"480/index.m3u8\n"
+
+	return os.WriteFile(filePath, []byte(content), 0644)
 }
