@@ -19,11 +19,12 @@ func NewUploadRepository(db *sql.DB) *UploadRepository {
 }
 
 func (r *UploadRepository) CreateUploadSession(ctx context.Context, data models.InitMultipartUploadRequest, session *models.UploadSession) error {
-	query := `INSERT INTO uploads (fingerprint, video_id, upload_id, s3_key, part_size, uploaded_parts, status) 
-	VALUES (?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO uploads (fingerprint, video_name, video_id, upload_id, s3_key, part_size, uploaded_parts, status) 
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := r.DB.ExecContext(ctx, query,
 		data.Fingerprint,
+		data.Name,
 		session.VideoID,
 		session.UploadID,
 		session.Key,

@@ -2,7 +2,7 @@ import { generateFingerprint } from "./fingerprint"
 import { completeMultipartUpload, initMultipartUpload, uploadParts } from "./multipart"
 import {partitionFile} from "./filePartition"
 
-const startUploadVideo=async(selectedFile, setStreamURL, setStatus, setStatusMsg)=>{
+const startUploadVideo=async(selectedFile, setStatusMsg)=>{
     const fingerprint = await generateFingerprint(selectedFile)
     console.log("Fingerprint for the file: ",selectedFile.name+" is "+ fingerprint)
 
@@ -19,10 +19,6 @@ const startUploadVideo=async(selectedFile, setStreamURL, setStatus, setStatusMsg
 
     if (session.status === "completed") {
         console.log("Video already uploaded")
-        const hlsURL = `${import.meta.env.VITE_HLS_BASE_URL}/${session.videoID}/master.m3u8`
-        setStreamURL(hlsURL)
-        setStatus(null)
-        setStatusMsg('')
         return { ...session, newSession: false }
     }
 
@@ -57,7 +53,7 @@ const startUploadVideo=async(selectedFile, setStreamURL, setStatus, setStatusMsg
         (a, b) => a.PartNumber - b.PartNumber
     )
 
-    const {multipartUploadMsg, uploadID, videoID} = await completeMultipartUpload({
+    const {msg:multipartUploadMsg, uploadID, videoID} = await completeMultipartUpload({
       uploadID: session.uploadID,
       key: session.key,
       videoID: session.videoID,

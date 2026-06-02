@@ -4,8 +4,8 @@ import Hls from 'hls.js'
 const VideoPlayer = ({ src }) => {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
-  const [levels, setLevels] = useState([])       // available quality levels
-  const [currentLevel, setCurrentLevel] = useState(-1)  // -1 = auto
+  const [levels, setLevels] = useState([])       
+  const [currentLevel, setCurrentLevel] = useState(-1)  
 
   useEffect(() => {
     const video = videoRef.current
@@ -21,19 +21,16 @@ const VideoPlayer = ({ src }) => {
       })
       hlsRef.current = hls
 
-      // load master.m3u8
       hls.loadSource(src)
       hls.attachMedia(video)
 
       hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
-        // data.levels is an array of { height, bitrate, ... }
         setLevels(data.levels)
-        setCurrentLevel(-1) // start on auto
+        setCurrentLevel(-1) 
         video.play().catch((err) => console.warn('Autoplay blocked:', err))
       })
 
       hls.on(Hls.Events.LEVEL_SWITCHED, () => {
-        // Sync UI if ABR auto-switches
         if (hls.autoLevelEnabled) setCurrentLevel(-1)
       })
 
@@ -55,7 +52,6 @@ const VideoPlayer = ({ src }) => {
       return () => hls.destroy()
     }
 
-    // Safari native HLS
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = src
       video.addEventListener('loadedmetadata', () => {
@@ -66,41 +62,36 @@ const VideoPlayer = ({ src }) => {
 
   const handleQualityChange = (levelIndex) => {
     const hls = hlsRef.current
-    if (!hls) return
+    const video = videoRef.current
+    if (!hls || !video) return
 
-    // -1 tells hls.js to resume automatic ABR
-    hls.currentLevel = levelIndex
-    setCurrentLevel(levelIndex)
+    if (levelIndex === -1) {
+      hls.loadLevel = -1 
+      setCurrentLevel(-1)
+    } else {
+      setCurrentLevel(levelIndex)
+      hls.nextLevel = levelIndex
+
+      if (!video.paused) {
+        video.pause()
+        setTimeout(() => {
+          video.play().catch((err) => console.warn('Playback resume failed:', err))
+        }, 150) 
+      }
+    }
   }
 
   const qualityLabel = (level) => `${level.height}p`
 
   return (
-    <div style={{ width: '100%', maxWidth: '1600px', margin: '0 auto' }}>
+    <div className="w-full max-w-[1600px] mx-auto">
       <video
         ref={videoRef}
         controls
-        width="100%"
-        style={{
-          borderRadius: '12px',
-          marginTop: '20px',
-          backgroundColor: '#000',
-          width: '100%',
-          height: '600px',
-          objectFit: 'contain',
-        }}
+        className="w-full h-[600px] rounded-xl mt-5 bg-black object-contain"
       />
       {levels.length > 0 && (
-        <div
-          style={{
-            marginTop: '18px',
-            display: 'flex',
-            gap: '8px',
-            justifyContent: 'center',
-            alignItems: 'center',
-            width: '100%',
-          }}
-        >
+        <div className="mt-4.5 flex gap-2 justify-center items-center w-full">
           <QualityBtn
             label="Auto"
             active={currentLevel === -1}
@@ -123,16 +114,13 @@ const VideoPlayer = ({ src }) => {
 const QualityBtn = ({ label, active, onClick }) => (
   <button
     onClick={onClick}
-    style={{
-      padding: '4px 12px',
-      borderRadius: '6px',
-      border: '1px solid #4f46e5',
-      background: active ? '#4f46e5' : 'transparent',
-      color: active ? '#fff' : '#4f46e5',
-      cursor: 'pointer',
-      fontSize: '13px',
-      fontWeight: active ? 600 : 400,
-    }}
+    className={`
+      px-3 py-1 rounded-md border text-sm cursor-pointer transition-colors duration-150
+      ${active 
+        ? 'border-[#4f46e5] bg-[#4f46e5] text-white font-semibold' 
+        : 'border-[#4f46e5] bg-transparent text-[#4f46e5] font-normal'
+      }
+    `}
   >
     {label}
   </button>

@@ -59,3 +59,12 @@ func (s *JobService) CreateTranscodingJob(ctx context.Context, data models.JobCr
 	}
 	return job, nil
 }
+
+func (s *JobService) GetAllJobs(ctx context.Context) ([]*models.Job, error) {
+	var jobs []*models.Job
+	jobs, err := s.JobRepository.GetAllJobs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch jobs: %w", err)
+	}
+	return jobs, nil
+}

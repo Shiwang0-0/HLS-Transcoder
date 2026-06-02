@@ -39,6 +39,35 @@ func (r *JobRepository) GetJob(ctx context.Context, jobID string) (*models.Job, 
 	return &job, nil
 }
 
+func (r *JobRepository) GetAllJobs(ctx context.Context) ([]*models.Job, error) {
+	query := `SELECT j.job_id, j.video_id, u.video_name, j.s3_key, j.status, j.stage, j.created_at FROM jobs j INNER JOIN uploads u ON j.video_id = u.video_id ORDER BY j.created_at DESC`
+
+	rows, err := r.DB.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*models.Job
+
+	for rows.Next() {
+		job := &models.Job{}
+
+		err := rows.Scan(&job.JobID, &job.VideoID, &job.VideoName, &job.Key, &job.Status, &job.Stage, &job.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
+}
+
 func (r *JobRepository) UpdateJobStatus(ctx context.Context, jobID, status, stage string) error {
 
 	query := `UPDATE jobs SET status = ?, stage = ? WHERE job_id = ?`

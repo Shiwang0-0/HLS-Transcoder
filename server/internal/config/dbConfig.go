@@ -17,7 +17,7 @@ func LoadMySQL() (*sql.DB, error) {
 	name := os.Getenv("DB_NAME")
 
 	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%s)/%s?parseTime=true",
+		"%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=Local",
 		user, pass, host, port, name,
 	)
 

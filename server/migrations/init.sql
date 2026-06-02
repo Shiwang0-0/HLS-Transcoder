@@ -1,6 +1,7 @@
 CREATE TABLE uploads (
     id           BIGINT AUTO_INCREMENT PRIMARY KEY,
     fingerprint  VARCHAR(64) NOT NULL UNIQUE,
+    video_name   VARCHAR(50) NOT NULL DEFAULT 'Untitled',
     video_id     VARCHAR(255) NOT NULL,
     upload_id    TEXT NOT NULL,        -- S3 multipart upload ID
     s3_key       TEXT NOT NULL,        -- where the file lives in S3

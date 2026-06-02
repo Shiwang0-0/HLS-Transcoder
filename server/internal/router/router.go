@@ -19,6 +19,7 @@ func RouteSetup(app *fiber.App, s3Service *service.S3Service, sqsService *servic
 	api.Post("/init-multipart-upload", uploadHandler.InitMultipartUpload)
 	api.Post("/complete-multipart-upload", uploadHandler.CompleteMultipartUpload)
 
+	api.Get("/jobs", jobHandler.GetAllJobs)
 	api.Get("/job/:jobid", jobHandler.GetJob)
 	api.Post("/job", jobHandler.CreateTranscodingJob)
 }

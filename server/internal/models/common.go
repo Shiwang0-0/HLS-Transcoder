@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type Part struct {
 	ETag       string `json:"ETag"`
 	PartNumber int32  `json:"PartNumber"`
@@ -15,10 +17,12 @@ type UploadSession struct {
 }
 
 type Job struct {
-	JobID   string `json:"jobID"`
-	VideoID string `json:"videoID"`
-	Key     string `json:"key"`
-	Status  string `json:"status"` // queued | processing | completed | failed
-	Stage   string `json:"stage"`  // sqs | ffmpeg | done
-	Error   string `json:"error,omitempty"`
+	JobID     string    `json:"jobID"`
+	VideoID   string    `json:"videoID"`
+	VideoName string    `json:"videoName"`
+	Key       string    `json:"key"`
+	Status    string    `json:"status"` // queued | processing | completed | failed
+	Stage     string    `json:"stage"`  // sqs | ffmpeg | done
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }

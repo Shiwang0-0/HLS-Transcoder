@@ -63,3 +63,16 @@ func (h *JobHandler) CreateTranscodingJob(c *fiber.Ctx) error {
 
 	return c.Status(200).JSON(response)
 }
+
+func (h *JobHandler) GetAllJobs(c *fiber.Ctx) error {
+	response := fiber.Map{
+		"msg": "All jobs fetched",
+	}
+	jobs, err := h.JobService.GetAllJobs(c.Context())
+	if err != nil {
+		response["msg"] = "Error fetching jobs"
+		return c.Status(500).JSON(response)
+	}
+	response["jobs"] = jobs
+	return c.Status(200).JSON(response)
+}
