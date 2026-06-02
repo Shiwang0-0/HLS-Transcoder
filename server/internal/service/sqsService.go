@@ -1,4 +1,4 @@
-package sqs
+package service
 
 import (
 	"context"
@@ -9,19 +9,19 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 )
 
-type Service struct {
+type SQSService struct {
 	Client   *sqs.Client
 	QueueURL string
 }
 
-func NewService(sqsClient *sqs.Client, QueueURL string) *Service {
-	return &Service{
-		Client:   sqsClient,
-		QueueURL: QueueURL,
+func NewSQSService(client *sqs.Client, queueURL string) *SQSService {
+	return &SQSService{
+		Client:   client,
+		QueueURL: queueURL,
 	}
 }
 
-func (s *Service) PutInQueue(ctx context.Context, data models.NotifyData) error {
+func (s *SQSService) PutInQueue(ctx context.Context, data *models.Job) error {
 
 	body, err := json.Marshal(data)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *Service) PutInQueue(ctx context.Context, data models.NotifyData) error 
 	return nil
 }
 
-func (s *Service) PollSQS(ctx context.Context) (*sqs.ReceiveMessageOutput, error) {
+func (s *SQSService) PollSQS(ctx context.Context) (*sqs.ReceiveMessageOutput, error) {
 	return s.Client.ReceiveMessage(
 		ctx,
 		&sqs.ReceiveMessageInput{
@@ -51,7 +51,7 @@ func (s *Service) PollSQS(ctx context.Context) (*sqs.ReceiveMessageOutput, error
 	)
 }
 
-func (s *Service) DeleteMessage(ctx context.Context, receiptHandle string) error {
+func (s *SQSService) DeleteMessage(ctx context.Context, receiptHandle string) error {
 
 	_, err := s.Client.DeleteMessage(
 		ctx,

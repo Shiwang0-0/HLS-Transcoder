@@ -7,24 +7,23 @@ import (
 	"log"
 	"time"
 
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/sqs"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/ffmpeg"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/redis"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/repository"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/service"
 )
 
 type Worker struct {
-	S3Service  *s3.Service
-	SqsService *sqs.Service
-	JobStore   *redis.JobStore
+	S3Service     *service.S3Service
+	SqsService    *service.SQSService
+	JobRepository *repository.JobRepository
 }
 
-func NewWorker(s3Service *s3.Service, sqsService *sqs.Service, JobStore *redis.JobStore) *Worker {
+func NewWorker(s3Service *service.S3Service, sqsService *service.SQSService, jobRepository *repository.JobRepository) *Worker {
 	return &Worker{
-		S3Service:  s3Service,
-		SqsService: sqsService,
-		JobStore:   JobStore,
+		S3Service:     s3Service,
+		SqsService:    sqsService,
+		JobRepository: jobRepository,
 	}
 }
 
@@ -48,8 +47,8 @@ func (w *Worker) Start(ctx context.Context) {
 			continue
 		}
 
-		for _, msg := range result.Messages { // for every video
-			var payload models.NotifyData
+		for _, msg := range result.Messages {
+			var payload models.Job
 
 			if err := json.Unmarshal([]byte(*msg.Body), &payload); err != nil {
 				log.Println(err)
@@ -58,25 +57,24 @@ func (w *Worker) Start(ctx context.Context) {
 
 			objectKey := payload.Key
 
-			// for every objectKey, get it from S3
+			// update status to downloading
+			w.JobRepository.UpdateJobStatus(ctx, payload.JobID, "downloading", "s3_download")
+
 			downloadCtx, cancelDownload := context.WithTimeout(ctx, time.Second*120)
 			localPath, err := w.S3Service.DownloadFile(downloadCtx, objectKey)
-			cancelDownload() // cancel immediately after download
+			cancelDownload()
 
 			if err != nil {
 				log.Printf("Download failed for %s: %v", objectKey, err)
+				w.JobRepository.UpdateJobStatus(ctx, payload.JobID, "failed", "s3_download")
 				continue
 			}
 
 			log.Printf("Downloaded to: %s", localPath)
 
-			// this process Message works on heartbeat,
-			// so every 20 seconds the sqs VisibilityTimeout increases because of the long processing task
-			// root ctx passed here, heartbeat manages SQS timeout internally
-
-			w.JobStore.UpdateStatus(ctx, payload.JobID, "processing", "ffmpeg", 10)
 			err = w.ProcessMessage(ctx, *msg.ReceiptHandle, func() error {
-				// Both inside processMessage — heartbeat covers everything
+				w.JobRepository.UpdateJobStatus(ctx, payload.JobID, "transcoding", "ffmpeg")
+
 				outputDir, err := ffmpeg.GenerateTranscoding(localPath, payload.VideoID)
 				if err != nil {
 					return err
@@ -84,7 +82,8 @@ func (w *Worker) Start(ctx context.Context) {
 
 				log.Printf("Transcoding done. outputDir=%s videoID=%s", outputDir, payload.VideoID)
 
-				// because the uploading part is also a long one, use heartbeat here also
+				w.JobRepository.UpdateJobStatus(ctx, payload.JobID, "uploading", "hls_upload")
+
 				HLSKeyPrefix := "hls/" + payload.VideoID
 				if err := w.S3Service.UploadDirectory(ctx, outputDir, HLSKeyPrefix); err != nil {
 					return fmt.Errorf("upload failed: %w", err)
@@ -96,24 +95,18 @@ func (w *Worker) Start(ctx context.Context) {
 
 			if err != nil {
 				log.Printf("processMessage failed: %v", err)
+				w.JobRepository.UpdateJobStatus(ctx, payload.JobID, "failed", "processing")
 				continue
 			}
 
-			// Delete ONLY after both transcode + upload succeed
 			if err := w.SqsService.DeleteMessage(ctx, *msg.ReceiptHandle); err != nil {
 				log.Printf("Failed to delete SQS message: %v", err)
 				continue
 			}
 
+			// mark as fully done
+			w.JobRepository.UpdateJobStatus(ctx, payload.JobID, "completed", "done")
 			log.Printf("Message deleted successfully")
-
-			job := models.JobStatus{
-				JobID:    payload.JobID,
-				Status:   "completed",
-				Stage:    "done",
-				Progress: 100,
-			}
-			w.JobStore.SetJob(ctx, job)
 		}
 	}
 }

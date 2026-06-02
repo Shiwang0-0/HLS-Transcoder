@@ -1,10 +1,11 @@
 import { useRef, useState, useEffect } from 'react'
 import Button from './components/UploadBtn'
-import { generatePresignedURL, notifyUploadComplete, uploadToS3 } from './helpers/s3'
-import { waitForJobCompletion } from './helpers/pollHLS'
+import Hls from 'hls.js'
 import VideoPlayer from './components/VideoPlayer'
 import Spinner from './components/Spinner'
-import Hls from 'hls.js'
+import startUploadVideo from './helpers/upload'
+import { createTranscodingJob } from './helpers/s3'
+import { waitForJobCompletion } from './helpers/pollHLS'
 
 const allowedTypes = {
   'video/mp4': true,
@@ -41,6 +42,7 @@ const App = () => {
     const video = document.createElement('video')
     video.preload = 'metadata'
 
+    const url = URL.createObjectURL(file);
     // after loading metadata, save the state
     video.onloadedmetadata = () => {
       setVideoMetadata({
@@ -59,7 +61,7 @@ const App = () => {
       alert('Failed to load video metadata')
     }
 
-    video.src = URL.createObjectURL(file)
+    video.src = url
   }
 
   const handleSend = async () => {
@@ -77,27 +79,30 @@ const App = () => {
       setStatus('uploading')
       setStatusMsg('Uploading video to S3...')
 
-      const { url, key, videoID, jobID } = await generatePresignedURL(videoMetadata)
-      await uploadToS3(url, selectedFile, videoMetadata.type)
-      await notifyUploadComplete(key, videoID, jobID)
+      const session = await startUploadVideo(selectedFile, setStreamURL, setStatus, setStatusMsg)
 
-      
-      setStatus('transcoding')
-      setStatusMsg('Transcoding in progress — waiting for stream to be ready...')
-      
-      // Poll until the .m3u8 manifest actually exists
-      await waitForJobCompletion(jobID, (status, stage) => {
-        setStatus(status)
-        setStatusMsg(`Stage: ${stage}`)
-      })
-      const hlsURL = `${import.meta.env.VITE_HLS_BASE_URL}/${videoID}/master.m3u8`
-      console.log('VideoID:', videoID)
-      console.log('jobID:', jobID)
-      console.log('Stream URL:', hlsURL)
+      // not uploaded
+      if(session.newSession){
+        setStatus('queuing')
+        setStatusMsg('Pushing Job to Queue...')
+        const {msg:notifyUploadToSQSMsg, job} = await createTranscodingJob(session.key, session.videoID)
+        console.log("NOTIFY UPLOAD TO SQS: ", notifyUploadToSQSMsg)
 
+        setStatus('transcoding')
+        setStatusMsg('Transcoding in progress...')
+
+        // poll until done
+        await waitForJobCompletion(job.jobID, (status, stage) => {
+            setStatus(status)
+            setStatusMsg(`Stage: ${stage}`)
+        })
+      }
+
+      const hlsURL = `${import.meta.env.VITE_HLS_BASE_URL}/${session.videoID}/master.m3u8`
       setStreamURL(hlsURL)
       setStatus(null)
       setStatusMsg('')
+
     } catch (err) {
       console.error('Failed:', err)
       setStatus('error')

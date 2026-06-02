@@ -1,20 +1,24 @@
 package router
 
 import (
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/sqs"
+	"database/sql"
+
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/handlers"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/redis"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/service"
 	"github.com/gofiber/fiber/v2"
 )
 
-func RouteSetup(app *fiber.App, s3Service *s3.Service, sqsService *sqs.Service, JobStore *redis.JobStore) {
+func RouteSetup(app *fiber.App, s3Service *service.S3Service, sqsService *service.SQSService, jobService *service.JobService, uploadService *service.UploadService, db *sql.DB) {
 
-	jobHandler := handlers.NewJobHandler(sqsService, JobStore)
-	uploadHandler := handlers.NewUploadHandler(s3Service, jobHandler)
+	jobHandler := handlers.NewJobHandler(jobService)
+	uploadHandler := handlers.NewUploadHandler(uploadService)
 
 	api := app.Group("/api")
-	api.Post("/presigned-url", uploadHandler.GeneratePresignedURL)
-	api.Post("/notify-upload", uploadHandler.NotifyUpload)
+
+	api.Post("/presigned-part-url", uploadHandler.GeneratePresignedPartURL)
+	api.Post("/init-multipart-upload", uploadHandler.InitMultipartUpload)
+	api.Post("/complete-multipart-upload", uploadHandler.CompleteMultipartUpload)
+
 	api.Get("/job/:jobid", jobHandler.GetJob)
+	api.Post("/job", jobHandler.CreateTranscodingJob)
 }

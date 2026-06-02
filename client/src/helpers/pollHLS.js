@@ -3,7 +3,11 @@ export const waitForJobCompletion = async (jobID, onProgress) => {
 
   while (true) {
     const res = await fetch(`http://localhost:8000/api/job/${jobID}`)
-    const job = await res.json()
+    const data = await res.json()
+    const job=data.job
+
+    // console.log("job: ", job)
+    console.log("status:", JSON.stringify(job.status)) 
 
     if (onProgress) {
       onProgress(job.status, job.stage)

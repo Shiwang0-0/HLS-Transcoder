@@ -4,10 +4,10 @@ import (
 	"context"
 	"log"
 
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/sqs"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/config"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/redis"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/repository"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/service"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/worker"
 	"github.com/joho/godotenv"
 )
@@ -29,20 +29,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	s3Client := s3.NewS3Client(awsConfig)
-	sqsClient := sqs.NewSQSClient(awsConfig)
-	redisClient := redis.NewRedisClient(appConfig)
+	s3Client := aws.NewS3Client(awsConfig)
+	sqsClient := aws.NewSQSClient(awsConfig)
 
+	db, err := config.LoadMySQL()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("MySQL config failed", err)
 	}
 
 	// initialize services
-	s3Service := s3.NewService(s3Client, appConfig.BucketName)
-	sqsService := sqs.NewService(sqsClient, appConfig.QueueURL)
-	JobStore := redis.NewJobStore(redisClient)
+	s3Service := service.NewS3Service(s3Client, appConfig.BucketName)
+	sqsService := service.NewSQSService(sqsClient, appConfig.QueueURL)
+	jobRepository := repository.NewJobRepository(db)
 
-	w := worker.NewWorker(s3Service, sqsService, JobStore)
+	w := worker.NewWorker(s3Service, sqsService, jobRepository)
 
 	w.Start(ctx) // start polling
 }

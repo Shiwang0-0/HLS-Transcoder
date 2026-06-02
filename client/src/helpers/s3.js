@@ -1,11 +1,11 @@
-export const generatePresignedURL=async (videoMetadata)=>{
+export const generatePresignedPartURL = async (payload)=>{
     try{
-        const response = await fetch('http://localhost:8000/api/presigned-url',{
+         const response = await fetch('http://localhost:8000/api/presigned-part-url',{
             method:'POST',
             headers:{
                 'Content-Type':'application/json',
             },
-            body:JSON.stringify(videoMetadata)
+            body:JSON.stringify(payload)
         })
 
         if(!response.ok){
@@ -19,34 +19,42 @@ export const generatePresignedURL=async (videoMetadata)=>{
         return data
     }catch(err){
         console.log(err)
+        throw err;
     }
 }
 
-export const uploadToS3 = async(presignedURL, file, fileType)=>{
-    const response = await fetch(presignedURL, {
-        method: "PUT",
-        body: file,
-        headers: {
-            "Content-Type": fileType,
-        },
-    })
+export const uploadPartToS3 = async (presignedPartURL,part,PartNumber) => {
+    console.log("presigned URL:", presignedPartURL)
+    const response = await fetch(presignedPartURL,
+        {
+            method: "PUT",
+            body: part,
+        }
+    )
 
     if (!response.ok) {
-        throw new Error("Failed to upload to S3")
+        throw new Error(
+        `Failed to upload part ${PartNumber}`
+        )
+    }
+    const ETag = response.headers.get("ETag")
+
+    if (!ETag) {
+        throw new Error(
+        `Missing ETag for part ${PartNumber}`
+        )
     }
 
-    return response
+    return {PartNumber,ETag}
 }
-
-export const notifyUploadComplete = async(key, videoID, jobID )=>{
+export const createTranscodingJob = async(key, videoID )=>{
     try{
         const payload={
             key,
             videoID,
-            jobID
         }
 
-        const response = await fetch('http://localhost:8000/api/notify-upload',{
+        const response = await fetch('http://localhost:8000/api/job',{
             method:'POST',
             headers:{
                 'Content-Type':'application/json'

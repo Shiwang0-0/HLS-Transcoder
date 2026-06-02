@@ -1,4 +1,4 @@
-package s3
+package service
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/config"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -18,50 +19,122 @@ import (
 	"github.com/google/uuid"
 )
 
-type Service struct {
+type S3Service struct {
 	Client     *s3.Client
 	BucketName string
 }
 
-func NewService(s3Client *s3.Client, bucketName string) *Service {
-	return &Service{
-		Client:     s3Client,
+func NewS3Service(client *s3.Client, bucketName string) *S3Service {
+	return &S3Service{
+		Client:     client,
 		BucketName: bucketName,
 	}
 }
 
-func (s *Service) GeneratePresignedURL(ctx context.Context, metaData models.VideoMetadata) (*models.PresignedURLResponse, error) {
+func (s *S3Service) GeneratePresignedPartURL(ctx context.Context, data models.PresignedPartURLRequest) (*models.PresignedURLResponse, error) {
 	presignClient := s3.NewPresignClient(s.Client)
 
-	// for every video to be identified as unique, add uuid in the objectKey
-	videoID := uuid.New().String()
-	jobID := uuid.New().String()
+	req, err := presignClient.PresignUploadPart(
+		ctx,
+		&s3.UploadPartInput{
+			Bucket: aws.String(s.BucketName),
 
-	// objectKey is only of videoId
-	objectKey := fmt.Sprintf(
-		"input/%s/%s",
-		videoID,
-		metaData.Name,
+			Key: aws.String(data.ObjectKey),
+
+			UploadId: aws.String(data.UploadID),
+
+			PartNumber: aws.Int32(
+				int32(data.PartNumber),
+			),
+		},
+		s3.WithPresignExpires(2*time.Minute),
 	)
-
-	req, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(s.BucketName),
-		Key:         aws.String(objectKey),
-		ContentType: aws.String(metaData.Type),
-	}, s3.WithPresignExpires(2*time.Minute))
 
 	if err != nil {
 		return nil, err
 	}
 	return &models.PresignedURLResponse{
-		URL:     req.URL,
-		Key:     objectKey,
-		VideoID: videoID,
-		JobID:   jobID,
+		URL: req.URL,
 	}, nil
 }
 
-func (s *Service) DownloadFile(ctx context.Context, objectKey string) (string, error) {
+func (s *S3Service) InitMultipartUpload(ctx context.Context, data models.InitMultipartUploadRequest) (*models.UploadSession, error) {
+	videoID := uuid.New().String()
+	// objectKey is only of videoId
+	ext := filepath.Ext(data.Name)
+	objectKey := fmt.Sprintf("uploads/%s/source%s", videoID, ext)
+
+	fmt.Println("MultiPart upload INIT objectKey: ", objectKey)
+
+	// creates a multipart upload session and returns an uploadID, which will be used to upload the chunks
+	result, err := s.Client.CreateMultipartUpload(
+		ctx,
+		&s3.CreateMultipartUploadInput{
+			Bucket: aws.String(s.BucketName),
+			Key:    aws.String(objectKey),
+
+			ContentType: aws.String(data.Type),
+		},
+	)
+
+	if err != nil {
+		fmt.Println("S3 CreateMultipartUpload ERROR:", err)
+		return nil, err
+	}
+
+	return &models.UploadSession{
+		UploadID: aws.ToString(result.UploadId),
+		Key:      objectKey,
+		VideoID:  videoID,
+		PartSize: config.DefaultPartSize,
+		Status:   "uploading",
+	}, nil
+}
+
+func (s *S3Service) AbortMultipartUpload(ctx context.Context, key, uploadID string) error {
+	_, err := s.Client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(s.BucketName),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	return err
+}
+
+func (s *S3Service) CompleteMultipartUpload(ctx context.Context, data models.CompleteMultipartUploadRequest) error {
+
+	completedParts := make([]types.CompletedPart, 0)
+
+	for _, part := range data.Parts {
+		completedParts = append(completedParts,
+			types.CompletedPart{
+				ETag: aws.String(part.ETag),
+
+				PartNumber: aws.Int32(
+					part.PartNumber,
+				),
+			},
+		)
+	}
+
+	_, err := s.Client.CompleteMultipartUpload(ctx,
+		&s3.CompleteMultipartUploadInput{
+			Bucket:   aws.String(s.BucketName),
+			Key:      aws.String(data.Key),
+			UploadId: aws.String(data.UploadID),
+			MultipartUpload: &types.CompletedMultipartUpload{
+				Parts: completedParts,
+			},
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *S3Service) DownloadFile(ctx context.Context, objectKey string) (string, error) {
 
 	// based on the size of the object that is on head, calculate the timeOutSeconds
 	headResult, err := s.Client.HeadObject(ctx, &s3.HeadObjectInput{
@@ -121,7 +194,7 @@ func (s *Service) DownloadFile(ctx context.Context, objectKey string) (string, e
 	return localPath, err
 }
 
-func (s *Service) UploadDirectory(ctx context.Context, localPath string, HLSKeyPrefix string) error {
+func (s *S3Service) UploadDirectory(ctx context.Context, localPath string, HLSKeyPrefix string) error {
 	// recursive go into the folders
 	return filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {

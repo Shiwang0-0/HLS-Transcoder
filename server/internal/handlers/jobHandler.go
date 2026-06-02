@@ -1,50 +1,65 @@
 package handlers
 
 import (
-	"context"
+	"fmt"
 
-	mysqs "github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/sqs"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/redis"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/service"
 	"github.com/gofiber/fiber/v2"
 )
 
 type JobHandler struct {
-	SQSService *mysqs.Service
-	JobStore   *redis.JobStore
+	JobService *service.JobService
 }
 
-func NewJobHandler(sqsService *mysqs.Service, jobStore *redis.JobStore) *JobHandler {
-	return &JobHandler{SQSService: sqsService, JobStore: jobStore}
-}
-
-func (h *JobHandler) PutInQueue(ctx context.Context, data models.NotifyData) error {
-
-	job := models.JobStatus{
-		JobID:    data.JobID,
-		Status:   "queued",
-		Stage:    "sqs",
-		Progress: 0,
-		Key:      data.Key,
+func NewJobHandler(jobService *service.JobService) *JobHandler {
+	return &JobHandler{
+		JobService: jobService,
 	}
-
-	err := h.JobStore.SetJob(ctx, job)
-	if err != nil {
-		return err
-	}
-
-	return h.SQSService.PutInQueue(ctx, data)
 }
 
 func (h *JobHandler) GetJob(c *fiber.Ctx) error {
+	response := fiber.Map{
+		"msg": "Job found",
+	}
 	jobID := c.Params("jobid")
 
-	job, err := h.JobStore.GetJob(c.Context(), jobID)
+	job, err := h.JobService.GetJob(c.Context(), jobID)
 	if err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "job not found",
-		})
+		response["msg"] = "Error searching for Job"
+		return c.Status(500).JSON(response)
+	}
+	if job == nil {
+		response["msg"] = "Job not found"
+		return c.Status(404).JSON(response)
+	}
+	response["job"] = job
+
+	return c.Status(200).JSON(response)
+}
+
+func (h *JobHandler) CreateTranscodingJob(c *fiber.Ctx) error {
+	response := fiber.Map{
+		"msg": "Service notified",
 	}
 
-	return c.JSON(job)
+	var data models.JobCreationRequest
+	if err := c.BodyParser(&data); err != nil {
+		response["msg"] = "Error parsing request body"
+		return c.Status(400).JSON(response)
+	}
+
+	job, err := h.JobService.CreateTranscodingJob(c.Context(), data)
+	if err != nil {
+		return fmt.Errorf("failed to create job: %w", err)
+	}
+
+	if err := h.JobService.UploadToSQS(c.Context(), job); err != nil {
+		response["msg"] = "Error notifying upload"
+		return c.Status(500).JSON(response)
+	}
+
+	response["job"] = job
+
+	return c.Status(200).JSON(response)
 }

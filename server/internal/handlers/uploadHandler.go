@@ -1,94 +1,85 @@
 package handlers
 
 import (
-	"fmt"
-
-	mys3 "github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/helpers"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/service"
 	"github.com/gofiber/fiber/v2"
 )
 
 type UploadHandler struct {
-	S3Service  *mys3.Service
-	JobHandler *JobHandler // abstracting the sqs handler
+	UploadService *service.UploadService
 }
 
-func NewUploadHandler(s3Service *mys3.Service, jobHandler *JobHandler) *UploadHandler {
+func NewUploadHandler(uploadService *service.UploadService) *UploadHandler {
 	return &UploadHandler{
-		S3Service:  s3Service,
-		JobHandler: jobHandler,
+		UploadService: uploadService,
 	}
 }
 
-func (h *UploadHandler) GeneratePresignedURL(c *fiber.Ctx) error {
-
-	context := fiber.Map{
-		"msg": "PresignedURL generated",
+func (h *UploadHandler) GeneratePresignedPartURL(c *fiber.Ctx) error {
+	response := fiber.Map{
+		"msg": "Presigned URL generated",
 	}
 
-	var metadata models.VideoMetadata
-
-	if err := c.BodyParser(&metadata); err != nil {
-		context["msg"] = "Error parsing request body"
-		return c.Status(400).JSON(context)
+	var data models.PresignedPartURLRequest
+	if err := c.BodyParser(&data); err != nil {
+		response["msg"] = "Error parsing request body"
+		return c.Status(400).JSON(response)
 	}
 
-	validationErr := validateMetadata(metadata)
-	if validationErr != nil {
-		context["msg"] = validationErr.Message
-		return c.Status(400).JSON(context)
-	}
-
-	response, err := h.S3Service.GeneratePresignedURL(c.Context(), metadata)
+	urlResponse, err := h.UploadService.GeneratePresignedPartURL(c.Context(), data)
 	if err != nil {
-		context["msg"] = "Error generating Presigned url"
-		return c.Status(400).JSON(context)
+		response["msg"] = "Error generating presigned URL"
+		return c.Status(500).JSON(response)
 	}
-	fmt.Println("Presigned URL: ", response.URL)
-	context["url"] = response.URL
-	context["key"] = response.Key
-	context["videoID"] = response.VideoID
-	context["jobID"] = response.JobID
-
-	return c.Status(200).JSON(context)
-}
-func validateMetadata(metadata models.VideoMetadata) *fiber.Error {
-	allowedTypes := map[string]bool{
-		"video/mp4": true,
-	}
-	if !allowedTypes[metadata.Type] {
-		return &fiber.Error{Message: "Media type not allowed"}
-	}
-
-	// validate file size (500MB limit)
-	const maxSize = 500 * 1024 * 1024
-	if metadata.Size > maxSize {
-		return &fiber.Error{Message: "File size cannot exceed 500MB"}
-	}
-
-	return nil
+	response["url"] = urlResponse.URL
+	return c.Status(200).JSON(response)
 }
 
-func (h *UploadHandler) NotifyUpload(c *fiber.Ctx) error {
-	context := fiber.Map{
-		"msg": "Service Notified",
+func (h *UploadHandler) InitMultipartUpload(c *fiber.Ctx) error {
+	response := fiber.Map{
+		"msg": "Multipart upload initialized",
 	}
 
-	var data models.NotifyData
+	var data models.InitMultipartUploadRequest
 
 	if err := c.BodyParser(&data); err != nil {
-		context["msg"] = "Error parsing request body"
-		return c.Status(400).JSON(context)
+		response["msg"] = "Error parsing request body"
+		return c.Status(400).JSON(response)
 	}
 
-	// push an entry into sqs regarding the s3 upload
-	err := h.JobHandler.PutInQueue(c.Context(), data)
+	if err := helpers.ValidateData(data); err != nil {
+		response["msg"] = err.Message
+		return c.Status(400).JSON(response)
+	}
+
+	session, err := h.UploadService.InitMultipartUpload(c.Context(), data)
 	if err != nil {
-		context["msg"] = "Error adding to sqs"
-		return c.Status(400).JSON(context)
+		response["msg"] = "Error initializing multipart upload"
+		return c.Status(500).JSON(response)
 	}
 
-	// fmt.Println("notify data: ", data.Key)
+	response["session"] = session
+	return c.Status(200).JSON(response)
+}
 
-	return c.Status(200).JSON(context)
+func (h *UploadHandler) CompleteMultipartUpload(c *fiber.Ctx) error {
+	response := fiber.Map{
+		"msg": "Multipart upload completed",
+	}
+	var data models.CompleteMultipartUploadRequest
+	if err := c.BodyParser(&data); err != nil {
+		response["msg"] = "Error parsing request body"
+		return c.Status(400).JSON(response)
+	}
+
+	if err := h.UploadService.CompleteMultipartUpload(c.Context(), data); err != nil {
+		response["msg"] = "Failed to complete multipart upload"
+		return c.Status(500).JSON(response)
+	}
+
+	response["videoID"] = data.VideoID
+	response["uploadID"] = data.UploadID
+	return c.Status(200).JSON(response)
 }

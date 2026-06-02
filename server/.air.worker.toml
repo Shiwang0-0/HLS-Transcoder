@@ -1,0 +1,6 @@
+root = "."
+
+[build]
+cmd = "go build -o ./tmp/worker ./cmd/worker"
+bin = "./tmp/worker"
+include_dir = ["cmd/worker", "internal/worker"]

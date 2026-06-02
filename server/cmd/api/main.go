@@ -4,11 +4,12 @@ import (
 	"context"
 	"log"
 
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/s3"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws/sqs"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/aws"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/config"
-	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/redis"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/repository"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/router"
+	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/service"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
@@ -35,24 +36,30 @@ func main() {
 	// aws sdk config
 	awsConfig, err := config.LoadAWS(ctx)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("AWS config failed", err)
+	}
+
+	// db initalize
+	db, err := config.LoadMySQL()
+	if err != nil {
+		log.Fatal("MySQL config failed", err)
 	}
 
 	// initialize clients
-	s3Client := s3.NewS3Client(awsConfig)
-	sqsClient := sqs.NewSQSClient(awsConfig)
-	redisClient := redis.NewRedisClient(appConfig)
+	s3Client := aws.NewS3Client(awsConfig)
+	sqsClient := aws.NewSQSClient(awsConfig)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	// initialize repositories
+	jobRepository := repository.NewJobRepository(db)
+	uploadRepository := repository.NewUploadRepository(db)
 
 	// initialize services
-	s3Service := s3.NewService(s3Client, appConfig.BucketName)
-	sqsService := sqs.NewService(sqsClient, appConfig.QueueURL)
-	JobStore := redis.NewJobStore(redisClient)
+	s3Service := service.NewS3Service(s3Client, appConfig.BucketName)
+	sqsService := service.NewSQSService(sqsClient, appConfig.QueueURL)
+	jobService := service.NewJobService(jobRepository, sqsService)
+	uploadService := service.NewUploadService(uploadRepository, s3Service)
 
-	router.RouteSetup(app, s3Service, sqsService, JobStore)
+	router.RouteSetup(app, s3Service, sqsService, jobService, uploadService, db)
 
 	app.Listen(":8000")
 }

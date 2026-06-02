@@ -2,6 +2,8 @@ package config
 
 import "os"
 
+const DefaultPartSize = 5 * 1024 * 1024
+
 type AppConfig struct {
 	BucketName string
 	QueueURL   string
