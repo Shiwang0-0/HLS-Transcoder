@@ -22,7 +22,6 @@ func NewSQSService(client *sqs.Client, queueURL string) *SQSService {
 }
 
 func (s *SQSService) PutInQueue(ctx context.Context, data *models.Job) error {
-
 	body, err := json.Marshal(data)
 	if err != nil {
 		return err

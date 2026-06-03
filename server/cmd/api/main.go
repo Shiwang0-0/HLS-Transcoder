@@ -61,5 +61,8 @@ func main() {
 
 	router.RouteSetup(app, s3Service, sqsService, jobService, uploadService, db)
 
+	// searched for jobs that were failed to be pushed to queue
+	go jobService.StartRetrySweeper(context.Background())
+
 	app.Listen(":8000")
 }

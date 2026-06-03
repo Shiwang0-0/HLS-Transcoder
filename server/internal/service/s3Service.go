@@ -14,20 +14,26 @@ import (
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/config"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
 )
 
 type S3Service struct {
-	Client     *s3.Client
-	BucketName string
+	Client          *s3.Client
+	BucketName      string
+	TransferManager *transfermanager.Client
 }
 
 func NewS3Service(client *s3.Client, bucketName string) *S3Service {
 	return &S3Service{
 		Client:     client,
 		BucketName: bucketName,
+		TransferManager: transfermanager.New(client, func(o *transfermanager.Options) {
+			o.PartSizeBytes = 5 * 1024 * 1024
+			o.Concurrency = 5 // 5 concurrent network pipes
+		}),
 	}
 }
 
@@ -134,64 +140,54 @@ func (s *S3Service) CompleteMultipartUpload(ctx context.Context, data models.Com
 	return nil
 }
 
+// download large files on concurrent network pipes
 func (s *S3Service) DownloadFile(ctx context.Context, objectKey string) (string, error) {
+	localPath := filepath.Join("media", objectKey)
+	parentDir := filepath.Dir(localPath)
 
-	// based on the size of the object that is on head, calculate the timeOutSeconds
-	headResult, err := s.Client.HeadObject(ctx, &s3.HeadObjectInput{
-		Bucket: &s.BucketName,
-		Key:    aws.String(objectKey),
-	})
+	// Ensure the destination directory exists
+	if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
+		log.Printf("Couldn't create directory %v, error: %v\n", parentDir, err)
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
 
+	file, err := os.Create(localPath)
 	if err != nil {
-		return "", err
+		log.Printf("Couldn't create file %v. Here's why: %v\n", localPath, err)
+		return "", fmt.Errorf("failed to create target file: %w", err)
 	}
 
-	fileSizeBytes := *headResult.ContentLength
-	// assuming minimum 5 MB/s download speed, add 60s buffer
-	timeoutSeconds := (fileSizeBytes / 1024 / 1024 / 5) + 60
-	if timeoutSeconds < 60 {
-		timeoutSeconds = 60
-	}
+	defer file.Close()
 
-	downloadCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
-	defer cancel()
-
-	result, err := s.Client.GetObject(downloadCtx, &s3.GetObjectInput{
+	log.Printf("Starting transfermanager stream download for: %s\n", objectKey)
+	result, err := s.TransferManager.GetObject(ctx, &transfermanager.GetObjectInput{
 		Bucket: aws.String(s.BucketName),
 		Key:    aws.String(objectKey),
 	})
 
 	if err != nil {
+		_ = os.Remove(localPath)
+
 		var noKey *types.NoSuchKey
 		if errors.As(err, &noKey) {
 			log.Printf("Can't get object %s from bucket %s. No such key exists.\n", objectKey, s.BucketName)
-			err = noKey
-		} else {
-			log.Printf("Couldn't get object %v:%v. Here's why: %v\n", s.BucketName, objectKey, err)
+			return "", noKey
 		}
-		return "", err
-	}
-	defer result.Body.Close()
 
-	localPath := filepath.Join("media", objectKey)
-
-	parentDir := filepath.Dir(localPath)
-
-	err = os.MkdirAll(parentDir, os.ModePerm)
-	if err != nil {
-		log.Printf("couldn't create directory %v, error: %v\n", parentDir, err)
-		return "", err
+		log.Printf("Couldn't initialize stream for %v:%v. Error: %v\n", s.BucketName, objectKey, err)
+		return "", fmt.Errorf("transfermanager GetObject failed: %w", err)
 	}
 
-	// save file
-	file, err := os.Create(localPath)
-	if err != nil {
-		log.Printf("Couldn't create file %v. Here's why: %v\n", localPath, err)
-		return "", err
-	}
-	defer file.Close()
+	// Use io.Copy to pump the data out of the managed network pool into the file
 	_, err = io.Copy(file, result.Body)
-	return localPath, err
+	if err != nil {
+		_ = os.Remove(localPath) // Clean up if network drops mid-stream
+		log.Printf("Failed to write stream to file: %v\n", err)
+		return "", fmt.Errorf("file write stream failed: %w", err)
+	}
+
+	log.Printf("Successfully downloaded %s to %s\n", objectKey, localPath)
+	return localPath, nil
 }
 
 func (s *S3Service) UploadDirectory(ctx context.Context, localPath string, HLSKeyPrefix string) error {

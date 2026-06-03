@@ -51,12 +51,16 @@ func (h *JobHandler) CreateTranscodingJob(c *fiber.Ctx) error {
 
 	job, err := h.JobService.CreateTranscodingJob(c.Context(), data)
 	if err != nil {
-		return fmt.Errorf("failed to create job: %w", err)
+		response["msg"] = "Error creating job"
 	}
 
 	if err := h.JobService.UploadToSQS(c.Context(), job); err != nil {
-		response["msg"] = "Error notifying upload"
-		return c.Status(500).JSON(response)
+		// even if failed, return the job the retry go routine will eventually push to SQS
+		response["msg"] = "Video uploaded and queued for processing."
+		fmt.Printf("Changing Job: %s status to failed_to_queue", job.JobID)
+
+		response["job"] = job
+		return c.Status(202).JSON(response)
 	}
 
 	response["job"] = job

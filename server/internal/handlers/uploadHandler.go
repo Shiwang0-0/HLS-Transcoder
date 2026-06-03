@@ -50,16 +50,14 @@ func (h *UploadHandler) InitMultipartUpload(c *fiber.Ctx) error {
 	}
 
 	if err := helpers.ValidateData(data); err != nil {
-		response["msg"] = err.Message
+		response["msg"] = err.Error()
 		return c.Status(400).JSON(response)
 	}
-
 	session, err := h.UploadService.InitMultipartUpload(c.Context(), data)
 	if err != nil {
 		response["msg"] = "Error initializing multipart upload"
 		return c.Status(500).JSON(response)
 	}
-
 	response["session"] = session
 	return c.Status(200).JSON(response)
 }

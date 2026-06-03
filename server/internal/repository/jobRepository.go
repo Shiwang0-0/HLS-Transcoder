@@ -68,6 +68,32 @@ func (r *JobRepository) GetAllJobs(ctx context.Context) ([]*models.Job, error) {
 	return jobs, nil
 }
 
+func (r *JobRepository) GetJobsByStatus(ctx context.Context, status string, limit int) ([]*models.Job, error) {
+	query := `SELECT job_id, video_id, s3_key FROM jobs WHERE status = ? LIMIT ?`
+
+	rows, err := r.DB.QueryContext(ctx, query, status, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute select query: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*models.Job
+	for rows.Next() {
+		var j models.Job
+		err := rows.Scan(&j.JobID, &j.VideoID, &j.Key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan job row: %w", err)
+		}
+		jobs = append(jobs, &j)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during rows iteration: %w", err)
+	}
+
+	return jobs, nil
+}
+
 func (r *JobRepository) UpdateJobStatus(ctx context.Context, jobID, status, stage string) error {
 
 	query := `UPDATE jobs SET status = ?, stage = ? WHERE job_id = ?`
@@ -81,7 +107,7 @@ func (r *JobRepository) UpdateJobStatus(ctx context.Context, jobID, status, stag
 
 func (r *JobRepository) CreateJob(ctx context.Context, jobID string, data models.JobCreationRequest) error {
 	query := `INSERT INTO jobs (job_id, video_id, s3_key, status, stage) 
-              VALUES (?, ?, ?, 'queued', 'waiting')`
+              VALUES (?, ?, ?, 'pending', 'creation')`
 
 	_, err := r.DB.ExecContext(ctx, query, jobID, data.VideoID, data.Key)
 	return err
