@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strconv"
+
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/helpers"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/service"
@@ -53,12 +55,43 @@ func (h *UploadHandler) InitMultipartUpload(c *fiber.Ctx) error {
 		response["msg"] = err.Error()
 		return c.Status(400).JSON(response)
 	}
-	session, err := h.UploadService.InitMultipartUpload(c.Context(), data)
+	internalSession, err := h.UploadService.InitMultipartUpload(c.Context(), data)
 	if err != nil {
 		response["msg"] = "Error initializing multipart upload"
 		return c.Status(500).JSON(response)
 	}
-	response["session"] = session
+
+	response["session"] = internalSession.ToPublic()
+	return c.Status(200).JSON(response)
+}
+
+func (h *UploadHandler) VerifyAndPersistParts(c *fiber.Ctx) error {
+	response := fiber.Map{
+		"msg": "Parts verfied and persisted",
+	}
+	sessionIDStr := c.Params("sessionId")
+	sessionID, err := strconv.ParseInt(sessionIDStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "invalid session id"})
+	}
+
+	// fmt.Println("sessionID: ", sessionID)
+
+	var data []models.Part
+	if err := c.BodyParser(&data); err != nil {
+		response["msg"] = "Error parsing request body"
+		return c.Status(400).JSON(response)
+	}
+
+	verifiedParts, missingParts, err := h.UploadService.VerifyAndPersistParts(c.Context(), sessionID, data)
+	if err != nil {
+		response["msg"] = "Error in parts verification and persistence"
+		return c.Status(500).JSON(response)
+	}
+
+	response["verifiedParts"] = verifiedParts
+	response["missingParts"] = missingParts
+
 	return c.Status(200).JSON(response)
 }
 
@@ -77,7 +110,5 @@ func (h *UploadHandler) CompleteMultipartUpload(c *fiber.Ctx) error {
 		return c.Status(500).JSON(response)
 	}
 
-	response["videoID"] = data.VideoID
-	response["uploadID"] = data.UploadID
 	return c.Status(200).JSON(response)
 }

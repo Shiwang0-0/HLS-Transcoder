@@ -33,7 +33,7 @@ func (h *JobHandler) GetJob(c *fiber.Ctx) error {
 		response["msg"] = "Job not found"
 		return c.Status(404).JSON(response)
 	}
-	response["job"] = job
+	response["job"] = job // already public
 
 	return c.Status(200).JSON(response)
 }
@@ -59,11 +59,11 @@ func (h *JobHandler) CreateTranscodingJob(c *fiber.Ctx) error {
 		response["msg"] = "Video uploaded and queued for processing."
 		fmt.Printf("Changing Job: %s status to failed_to_queue", job.JobID)
 
-		response["job"] = job
+		response["job"] = job.ToPublic()
 		return c.Status(202).JSON(response)
 	}
 
-	response["job"] = job
+	response["job"] = job.ToPublic()
 
 	return c.Status(200).JSON(response)
 }
@@ -77,6 +77,6 @@ func (h *JobHandler) GetAllJobs(c *fiber.Ctx) error {
 		response["msg"] = "Error fetching jobs"
 		return c.Status(500).JSON(response)
 	}
-	response["jobs"] = jobs
+	response["jobs"] = jobs // already public
 	return c.Status(200).JSON(response)
 }

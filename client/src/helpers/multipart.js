@@ -19,7 +19,7 @@ export const initMultipartUpload= async({name, type, size, fingerprint})=>{
 
         if (!response.ok) {
             const errorData = await response.json()
-            throw new Error(errorData.error || 'Failed to initialize upload')
+            throw new Error(errorData.msg || 'Failed to initialize upload')
         }
 
         const data = await response.json()
@@ -28,23 +28,32 @@ export const initMultipartUpload= async({name, type, size, fingerprint})=>{
 }
 
 export const uploadParts=async(initData, allParts)=>{
-    const uploadedParts = await Promise.all(
+    const result = await Promise.allSettled(
         allParts.map(async (it) => {
 
-            const { url, msg } = await generatePresignedPartURL({
-                uploadID: initData.uploadID,
-                objectKey: initData.key,
-                partNumber: it.partNumber
+            const { url } = await generatePresignedPartURL({
+                sessionID: initData.id,
+                PartNumber: it.PartNumber
             })
-            console.log("PRESIGNED URL: "+it.partNumber+" "+ msg)
 
-            return uploadPartToS3(url, it.part, it.partNumber)
+            return uploadPartToS3(url, it.part, it.PartNumber)
         })
     )
-    return uploadedParts
+
+    // for all the promises that were fullfilled, save them
+    const uploadedParts = result.filter(r=>r.status === 'fulfilled' && r.value!=null).map(r=>r.value)
+    const failedPartNumbers = allParts
+        .filter((_, i) => result[i].status === 'rejected' || result[i].value == null)
+        .map(p => p.PartNumber)
+
+    if (failedPartNumbers.length > 0) {
+        console.warn(`Parts failed to upload: ${failedPartNumbers}`)
+    }
+
+    return { uploadedParts, failedPartNumbers }
 }
 
-export const completeMultipartUpload =async ({ uploadID, key, videoID, parts}) => {
+export const completeMultipartUpload =async ({ sessionID, videoID, parts}) => {
 
     const response = await fetch(
       'http://localhost:8000/api/complete-multipart-upload',
@@ -54,7 +63,7 @@ export const completeMultipartUpload =async ({ uploadID, key, videoID, parts}) =
           'Content-Type': 'application/json'
         },
 
-        body: JSON.stringify({ uploadID, key, videoID, parts})
+        body: JSON.stringify({ sessionID, videoID, parts})
       }
     )
 

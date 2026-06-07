@@ -103,7 +103,7 @@ export default function VideoFeed() {
               <polygon points="5,3 19,12 5,21" />
             </svg>
           </div>
-          <span className="text-[15px] font-medium tracking-tight">streamvault</span>
+          <span className="text-[15px] font-medium tracking-tight">hls-transcoder</span>
         </div>
         <button
           onClick={() => setShowUpload(true)}

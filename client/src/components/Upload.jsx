@@ -4,10 +4,8 @@ import Spinner from './Spinner'
 import startUploadVideo from '../helpers/upload'
 import { createTranscodingJob } from '../helpers/s3'
 import { waitForJobCompletion } from '../helpers/pollHLS'
+import {validateFile} from "../helpers/validation"
 
-const allowedTypes = {
-  'video/mp4': true,
-}
 
 const Upload = ({onUploadComplete}) => {
   const fileInputRef = useRef(null)
@@ -24,9 +22,12 @@ const Upload = ({onUploadComplete}) => {
     const file = e.target.files[0]
     if (!file) return
 
-    if (!allowedTypes[file.type]) {
-      alert('Unsupported video format')
-      return
+    const error = validateFile(file)
+
+    if (error) {
+        alert(error)
+        e.target.value = ""
+        return
     }
 
     setSelectedFile(file)
@@ -46,7 +47,7 @@ const Upload = ({onUploadComplete}) => {
         setStatus('queuing')
         setStatusMsg('Pushing Job to Queue...')
         
-        const {msg:notifyUploadToSQSMsg, job} = await createTranscodingJob(session.key, session.videoID)
+        const {msg:notifyUploadToSQSMsg, job} = await createTranscodingJob(session.id, session.videoID)
         console.log("NOTIFY UPLOAD TO SQS: ", notifyUploadToSQSMsg)
 
         setStatus('transcoding')

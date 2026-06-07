@@ -1,17 +1,18 @@
-export const partitionFile=(file, partSize)=>{
-    const parts = []
-
-    let start = 0
-    let partNumber = 1
+export const getRemainingParts = (file, partSize, uploadedPartNumbersSet) => {
+    const remainingParts = [];
+    let start = 0;
+    let PartNumber = 1;
 
     while (start < file.size) {
-        const part = file.slice(start,start + partSize)
+        // ONLY slice and store if we actually need to upload this part
+        if (!uploadedPartNumbersSet.has(PartNumber)) {
+            const part = file.slice(start, start + partSize);
+            remainingParts.push({ PartNumber, part });
+        }
 
-        parts.push({partNumber,part})
-
-        start += partSize
-        partNumber++
+        start += partSize;
+        PartNumber++;
     }
 
-    return parts
-}
+    return remainingParts;
+};

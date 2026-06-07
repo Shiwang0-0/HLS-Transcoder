@@ -23,6 +23,7 @@ func NewJobService(jobRepository *repository.JobRepository, sqsService *SQSServi
 	}
 }
 
+// send public job
 func (s *JobService) GetJob(ctx context.Context, jobID string) (*models.Job, error) {
 	job, err := s.JobRepository.GetJob(ctx, jobID)
 
@@ -33,7 +34,7 @@ func (s *JobService) GetJob(ctx context.Context, jobID string) (*models.Job, err
 }
 
 // NotifyUploadToSQS updates job status in DB then pushes to SQS
-func (s *JobService) UploadToSQS(ctx context.Context, job *models.Job) error {
+func (s *JobService) UploadToSQS(ctx context.Context, job *models.JobInternal) error {
 
 	if err := s.SQSService.PutInQueue(ctx, job); err != nil {
 		dbErr := s.JobRepository.UpdateJobStatus(ctx, job.JobID, "failed_to_queue", "sqs_error")
@@ -49,23 +50,31 @@ func (s *JobService) UploadToSQS(ctx context.Context, job *models.Job) error {
 	return nil
 }
 
-func (s *JobService) CreateTranscodingJob(ctx context.Context, data models.JobCreationRequest) (*models.Job, error) {
+func (s *JobService) CreateTranscodingJob(ctx context.Context, data models.JobCreationRequest) (*models.JobInternal, error) {
 
 	jobID := uuid.New().String()
 
-	err := s.JobRepository.CreateJob(ctx, jobID, data)
+	videoID := data.VideoID
+
+	s3Key, err := s.JobRepository.GetS3KeyByVideoID(ctx, videoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get s3 key: %w", err)
+	}
+
+	err = s.JobRepository.CreateJob(ctx, jobID, data, s3Key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
 
-	job := &models.Job{
+	job := &models.JobInternal{
 		JobID:   jobID,
 		VideoID: data.VideoID,
-		Key:     data.Key,
+		Key:     s3Key,
 	}
 	return job, nil
 }
 
+// send public job
 func (s *JobService) GetAllJobs(ctx context.Context) ([]*models.Job, error) {
 	var jobs []*models.Job
 	jobs, err := s.JobRepository.GetAllJobs(ctx)

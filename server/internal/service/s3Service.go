@@ -37,7 +37,7 @@ func NewS3Service(client *s3.Client, bucketName string) *S3Service {
 	}
 }
 
-func (s *S3Service) GeneratePresignedPartURL(ctx context.Context, data models.PresignedPartURLRequest) (*models.PresignedURLResponse, error) {
+func (s *S3Service) GeneratePresignedPartURL(ctx context.Context, data models.PresignedPartURLRequest, objectKey, uploadId string) (*models.PresignedURLResponse, error) {
 	presignClient := s3.NewPresignClient(s.Client)
 
 	req, err := presignClient.PresignUploadPart(
@@ -45,9 +45,9 @@ func (s *S3Service) GeneratePresignedPartURL(ctx context.Context, data models.Pr
 		&s3.UploadPartInput{
 			Bucket: aws.String(s.BucketName),
 
-			Key: aws.String(data.ObjectKey),
+			Key: aws.String(objectKey),
 
-			UploadId: aws.String(data.UploadID),
+			UploadId: aws.String(uploadId),
 
 			PartNumber: aws.Int32(
 				int32(data.PartNumber),
@@ -64,7 +64,7 @@ func (s *S3Service) GeneratePresignedPartURL(ctx context.Context, data models.Pr
 	}, nil
 }
 
-func (s *S3Service) InitMultipartUpload(ctx context.Context, data models.InitMultipartUploadRequest) (*models.UploadSession, error) {
+func (s *S3Service) InitMultipartUpload(ctx context.Context, data models.InitMultipartUploadRequest) (*models.UploadSessionInternal, error) {
 	videoID := uuid.New().String()
 	// objectKey is only of videoId
 	ext := filepath.Ext(data.Name)
@@ -88,7 +88,7 @@ func (s *S3Service) InitMultipartUpload(ctx context.Context, data models.InitMul
 		return nil, err
 	}
 
-	return &models.UploadSession{
+	return &models.UploadSessionInternal{
 		UploadID: aws.ToString(result.UploadId),
 		Key:      objectKey,
 		VideoID:  videoID,
@@ -106,7 +106,7 @@ func (s *S3Service) AbortMultipartUpload(ctx context.Context, key, uploadID stri
 	return err
 }
 
-func (s *S3Service) CompleteMultipartUpload(ctx context.Context, data models.CompleteMultipartUploadRequest) error {
+func (s *S3Service) CompleteMultipartUpload(ctx context.Context, data models.CompleteMultipartUploadRequest, key, uploadID string) error {
 
 	completedParts := make([]types.CompletedPart, 0)
 
@@ -125,8 +125,8 @@ func (s *S3Service) CompleteMultipartUpload(ctx context.Context, data models.Com
 	_, err := s.Client.CompleteMultipartUpload(ctx,
 		&s3.CompleteMultipartUploadInput{
 			Bucket:   aws.String(s.BucketName),
-			Key:      aws.String(data.Key),
-			UploadId: aws.String(data.UploadID),
+			Key:      aws.String(key),
+			UploadId: aws.String(uploadID),
 			MultipartUpload: &types.CompletedMultipartUpload{
 				Parts: completedParts,
 			},
@@ -239,4 +239,37 @@ func (s *S3Service) UploadDirectory(ctx context.Context, localPath string, HLSKe
 		fmt.Println("Uploaded:", s3Key)
 		return nil
 	})
+}
+
+func (s *S3Service) ListPartsFromS3(ctx context.Context, uploadID, key string) ([]models.Part, error) {
+	var allParts []models.Part
+	var partNumberMarker *string
+
+	for {
+		input := &s3.ListPartsInput{
+			Bucket:           aws.String(s.BucketName),
+			Key:              aws.String(key),
+			UploadId:         aws.String(uploadID),
+			PartNumberMarker: partNumberMarker,
+		}
+
+		output, err := s.Client.ListParts(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("s3 ListParts: %w", err)
+		}
+
+		for _, p := range output.Parts {
+			allParts = append(allParts, models.Part{
+				PartNumber: *p.PartNumber,
+				ETag:       aws.ToString(p.ETag),
+			})
+		}
+
+		if output.IsTruncated == nil || !*output.IsTruncated {
+			break
+		}
+		partNumberMarker = output.NextPartNumberMarker
+	}
+
+	return allParts, nil
 }

@@ -1,14 +1,13 @@
 package models
 
 type PresignedPartURLRequest struct {
-	ObjectKey  string `json:"objectKey"`
-	UploadID   string `json:"uploadID"`
-	PartNumber int64  `json:"partNumber"`
+	SessionID  int64 `json:"sessionID"`
+	PartNumber int64 `json:"PartNumber"`
 }
 
 type JobCreationRequest struct {
-	Key     string `json:"key"`
-	VideoID string `json:"videoID"`
+	SessionID int64  `json:"sessionID"`
+	VideoID   string `json:"videoID"`
 }
 
 type InitMultipartUploadRequest struct {
@@ -19,8 +18,7 @@ type InitMultipartUploadRequest struct {
 }
 
 type CompleteMultipartUploadRequest struct {
-	UploadID string `json:"uploadID"`
-	Key      string `json:"key"`
-	VideoID  string `json:"videoID"`
-	Parts    []Part `json:"parts"`
+	SessionID int64  `json:"sessionID"`
+	VideoID   string `json:"videoID"`
+	Parts     []Part `json:"parts"`
 }

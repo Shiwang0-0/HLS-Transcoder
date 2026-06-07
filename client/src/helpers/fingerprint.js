@@ -1,16 +1,37 @@
-// we are loading the whole file, instead running hash for different chunks can be used but since we are not dealing with huge files, it is okay for now
-export const generateFingerprint = async (file) => {
-  const buffer = await file.arrayBuffer()
+import SparkMD5 from 'spark-md5';
 
-  // Generate SHA-256 hash
-  const hashBuffer = await crypto.subtle.digest('SHA-256',buffer)
+export const generateFingerprint = (file) => {
+    return new Promise((resolve, reject) => {
+        const chunkSize = 2 * 1024 * 1024; // Read in 2MB chunks
+        const chunks = Math.ceil(file.size / chunkSize);
+        let currentChunk = 0;
+        
+        const spark = new SparkMD5.ArrayBuffer();
+        const fileReader = new FileReader();
 
-  // convert hash bytes -> hex string
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
+        fileReader.onload = (e) => {
+            // Append this specific chunk to the running hash calculation
+            spark.append(e.target.result); 
+            currentChunk++;
 
-  const hashHex = hashArray
-    .map(byte => byte.toString(16).padStart(2, '0'))
-    .join('')
+            if (currentChunk < chunks) {
+                loadNext();
+            } else {
+                // return the final hex string
+                resolve(spark.end());
+            }
+        };
 
-  return hashHex
-}
+        fileReader.onerror = () => {
+            reject(new Error("File reading failed during fingerprint generation"));
+        };
+
+        const loadNext = () => {
+            const start = currentChunk * chunkSize;
+            const end = Math.min(start + chunkSize, file.size);
+            fileReader.readAsArrayBuffer(file.slice(start, end));
+        };
+
+        loadNext();
+    });
+};

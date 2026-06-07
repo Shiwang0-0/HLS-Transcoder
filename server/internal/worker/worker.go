@@ -48,7 +48,7 @@ func (w *Worker) Start(ctx context.Context) {
 		}
 
 		for _, msg := range result.Messages {
-			var payload models.Job
+			var payload models.JobInternal
 
 			if err := json.Unmarshal([]byte(*msg.Body), &payload); err != nil {
 				log.Println(err)
