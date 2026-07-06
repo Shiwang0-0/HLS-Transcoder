@@ -1,4 +1,4 @@
-module github.com/Shiwang0-0/HLS-Transcoder
+module github.com/Shiwang0-0/HLS-Transcoder/server
 
 go 1.25.1
 

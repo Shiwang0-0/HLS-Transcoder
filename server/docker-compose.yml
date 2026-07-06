@@ -1,0 +1,46 @@
+services:
+
+  mysql:
+    image: mysql:8.4
+    container_name: hls-mysql
+    restart: unless-stopped
+    env_file:
+      - .docker.env
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql:ro # also runs the migrations
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: hls-api
+    env_file:
+      - .docker.env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file:
+      - .docker.env
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
