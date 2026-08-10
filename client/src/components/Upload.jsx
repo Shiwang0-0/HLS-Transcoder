@@ -3,7 +3,7 @@ import Button from './UploadBtn'
 import Spinner from './Spinner'
 import startUploadVideo from '../helpers/upload'
 import { createTranscodingJob } from '../helpers/s3'
-import { waitForJobCompletion } from '../helpers/pollHLS'
+import { streamJobStatus } from '../helpers/pollHLS'
 import {validateFile} from "../helpers/validation"
 
 
@@ -43,21 +43,18 @@ const Upload = ({onUploadComplete}) => {
 
       const session = await startUploadVideo(selectedFile, setStatusMsg)
 
+      const streamPromise = streamJobStatus(session.jobID, (status, stage) => {
+        setStatus(status)
+        setStatusMsg(`Stage: ${stage}`)
+      })
+
       if(session.newSession){
-        setStatus('queuing')
-        setStatusMsg('Pushing Job to Queue...')
-        
-        const {msg:notifyUploadToSQSMsg, job} = await createTranscodingJob(session.id, session.videoID)
-        console.log("NOTIFY UPLOAD TO SQS: ", notifyUploadToSQSMsg)
-
-        setStatus('transcoding')
-        setStatusMsg('Transcoding in progress...')
-
-        await waitForJobCompletion(job.jobID, (status, stage) => {
-            setStatus(status)
-            setStatusMsg(`Stage: ${stage}`)
-        })
+        setStatusMsg('Pushing job to queue...')
+        const { msg: queueMsg, job } = await createTranscodingJob(session.id, session.videoID)
+        console.log('QUEUE RESPONSE:', queueMsg, job)
       }
+
+      await streamPromise
 
       setStatus('success')
       setStatusMsg('Your video was uploaded and processed successfully!')

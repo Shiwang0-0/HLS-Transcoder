@@ -11,7 +11,7 @@ import (
 func RouteSetup(app *fiber.App, s3Service *service.S3Service, sqsService *service.SQSService, jobService *service.JobService, uploadService *service.UploadService, db *sql.DB) {
 
 	jobHandler := handlers.NewJobHandler(jobService)
-	uploadHandler := handlers.NewUploadHandler(uploadService)
+	uploadHandler := handlers.NewUploadHandler(uploadService, jobService)
 
 	api := app.Group("/api")
 
@@ -22,5 +22,6 @@ func RouteSetup(app *fiber.App, s3Service *service.S3Service, sqsService *servic
 
 	api.Get("/jobs", jobHandler.GetAllJobs)
 	api.Get("/job/:jobid", jobHandler.GetJob)
-	api.Post("/job", jobHandler.CreateTranscodingJob)
+	app.Get("/api/job/:jobid/stream", jobHandler.StreamJobStatus)
+	api.Post("/job", jobHandler.QueueTranscodingJob)
 }

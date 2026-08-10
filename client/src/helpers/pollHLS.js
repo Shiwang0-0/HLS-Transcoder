@@ -1,26 +1,34 @@
-export const waitForJobCompletion = async (jobID, onProgress) => {
-  const intervalMs = 3000
+export const streamJobStatus = (jobID, onProgress) => {
+  const es = new EventSource(`http://localhost:8000/api/job/${jobID}/stream`)
 
-  while (true) {
-    const res = await fetch(`http://localhost:8000/api/job/${jobID}`)
-    const data = await res.json()
-    const job=data.job
+  return new Promise((resolve, reject) => {
+    let retryCount = 0
+    const maxRetries = 5
 
-    // console.log("job: ", job)
-    console.log("status:", JSON.stringify(job.status)) 
+    es.onmessage = (e) => {
+      retryCount = 0 // real message arrived, connection is healthy
 
-    if (onProgress) {
-      onProgress(job.status, job.stage)
+      const { status, stage } = JSON.parse(e.data)
+      onProgress(status, stage)
+
+      if (status === 'completed') { es.close(); resolve() }
+      if (status === 'failed') { es.close(); reject(new Error(stage || 'Transcoding failed')) }
     }
 
-    if (job.status === "completed") {
-      return
-    }
+    es.onerror = () => {
+      // CONNECTING = browser is auto-retrying
+      if (es.readyState === EventSource.CONNECTING) {
+        retryCount++
+        if (retryCount > maxRetries) {
+          es.close()
+          reject(new Error('Connection lost after multiple retries'))
+        }
+        return
+      }
 
-    if (job.status === "failed") {
-      throw new Error(job.error || "Transcoding failed")
+      // CLOSED = browser has permanently given up
+      es.close()
+      reject(new Error('Connection lost'))
     }
-
-    await new Promise(r => setTimeout(r, intervalMs))
-  }
+  })
 }

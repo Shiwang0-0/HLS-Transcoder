@@ -15,7 +15,7 @@ CREATE TABLE uploads (
 CREATE TABLE jobs (
     id           BIGINT AUTO_INCREMENT PRIMARY KEY,
     job_id       VARCHAR(255) NOT NULL UNIQUE,
-    video_id     VARCHAR(255) NOT NULL,
+    video_id     VARCHAR(255) NOT NULL UNIQUE,
     s3_key       TEXT NOT NULL,        -- source file key, needed by worker
     status       VARCHAR(50),          -- queued | downloading | transcoding | uploading | completed | failed
     stage        VARCHAR(50),

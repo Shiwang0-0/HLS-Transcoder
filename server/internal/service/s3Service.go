@@ -64,7 +64,7 @@ func (s *S3Service) GeneratePresignedPartURL(ctx context.Context, data models.Pr
 	}, nil
 }
 
-func (s *S3Service) InitMultipartUpload(ctx context.Context, data models.InitMultipartUploadRequest) (*models.UploadSessionInternal, error) {
+func (s *S3Service) InitMultipartUpload(ctx context.Context, data models.InitMultipartUploadRequest) (*models.UploadSession, error) {
 	videoID := uuid.New().String()
 	// objectKey is only of videoId
 	ext := filepath.Ext(data.Name)
@@ -88,7 +88,7 @@ func (s *S3Service) InitMultipartUpload(ctx context.Context, data models.InitMul
 		return nil, err
 	}
 
-	return &models.UploadSessionInternal{
+	return &models.UploadSession{
 		UploadID: aws.ToString(result.UploadId),
 		Key:      objectKey,
 		VideoID:  videoID,

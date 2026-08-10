@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -21,7 +23,7 @@ func NewSQSService(client *sqs.Client, queueURL string) *SQSService {
 	}
 }
 
-func (s *SQSService) PutInQueue(ctx context.Context, data *models.JobInternal) error {
+func (s *SQSService) PutInQueue(ctx context.Context, data *models.JobMessage) error {
 	body, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -45,7 +47,7 @@ func (s *SQSService) PollSQS(ctx context.Context) (*sqs.ReceiveMessageOutput, er
 		&sqs.ReceiveMessageInput{
 			QueueUrl:            &s.QueueURL,
 			MaxNumberOfMessages: 10,
-			WaitTimeSeconds:     20,
+			WaitTimeSeconds:     20, // long polling
 		},
 	)
 }
@@ -61,4 +63,17 @@ func (s *SQSService) DeleteMessage(ctx context.Context, receiptHandle string) er
 	)
 
 	return err
+}
+
+// in SQSService
+func (s *SQSService) ChangeMessageVisibility(ctx context.Context, receiptHandle string, timeout time.Duration) error {
+	_, err := s.Client.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
+		QueueUrl:          &s.QueueURL,
+		ReceiptHandle:     &receiptHandle,
+		VisibilityTimeout: int32(timeout.Seconds()),
+	})
+	if err != nil {
+		return fmt.Errorf("change message visibility: %w", err)
+	}
+	return nil
 }

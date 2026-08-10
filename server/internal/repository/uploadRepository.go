@@ -18,7 +18,7 @@ func NewUploadRepository(db *sql.DB) *UploadRepository {
 	}
 }
 
-func (r *UploadRepository) CreateUploadSession(ctx context.Context, data models.InitMultipartUploadRequest, session *models.UploadSessionInternal) error {
+func (r *UploadRepository) CreateUploadSession(ctx context.Context, data models.InitMultipartUploadRequest, session *models.UploadSession) error {
 	query := `INSERT INTO uploads (fingerprint, video_name, video_id, upload_id, s3_key, part_size, uploaded_parts, status) 
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
@@ -45,10 +45,10 @@ func (r *UploadRepository) CreateUploadSession(ctx context.Context, data models.
 	return nil
 }
 
-func (r *UploadRepository) CheckAlreadyUploaded(ctx context.Context, fingerprint string) (*models.UploadSessionInternal, error) {
+func (r *UploadRepository) CheckAlreadyUploaded(ctx context.Context, fingerprint string) (*models.UploadSession, error) {
 	query := `SELECT id, upload_id, s3_key, video_id, status, part_size, uploaded_parts FROM uploads WHERE fingerprint = ? LIMIT 1`
 
-	var session models.UploadSessionInternal
+	var session models.UploadSession
 
 	var uploadedPartsRaw []byte
 
@@ -77,17 +77,14 @@ func (r *UploadRepository) CheckAlreadyUploaded(ctx context.Context, fingerprint
 	return &session, nil
 }
 
-func (r *UploadRepository) GetSessionByID(ctx context.Context, sessionID int64) (*models.UploadSessionInternal, error) {
-	query := `SELECT upload_id, s3_key, uploaded_parts FROM uploads WHERE id = ?`
+func (r *UploadRepository) GetSessionByID(ctx context.Context, sessionID int64) (*models.UploadSession, error) {
+	query := `SELECT upload_id, s3_key, video_id, uploaded_parts FROM uploads WHERE id = ?`
 
-	var session models.UploadSessionInternal
-
+	var session models.UploadSession
 	var uploadedPartsRaw []byte
 
 	err := r.DB.QueryRowContext(ctx, query, sessionID).Scan(
-		&session.UploadID,
-		&session.Key,
-		&uploadedPartsRaw,
+		&session.UploadID, &session.Key, &session.VideoID, &uploadedPartsRaw,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -103,7 +100,6 @@ func (r *UploadRepository) GetSessionByID(ctx context.Context, sessionID int64) 
 	} else {
 		session.UploadedParts = []models.Part{}
 	}
-
 	return &session, nil
 }
 

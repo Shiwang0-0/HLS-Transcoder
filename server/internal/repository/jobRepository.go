@@ -7,10 +7,16 @@ import (
 	"log"
 
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
+	"github.com/google/uuid"
 )
 
 type JobRepository struct {
 	DB *sql.DB
+}
+
+type UploadStatus struct {
+	S3Key  string
+	Status string
 }
 
 func NewJobRepository(db *sql.DB) *JobRepository {
@@ -19,13 +25,29 @@ func NewJobRepository(db *sql.DB) *JobRepository {
 	}
 }
 
+// CreateJobShell creates a job row the moment an upload session starts,
+// before any parts or completion has happened. Key is already known at
+// this point (S3Service.InitMultipartUpload generates it deterministically).
+func (r *JobRepository) CreateJobShell(ctx context.Context, videoID, s3Key string) (string, error) {
+	jobID := uuid.New().String()
+
+	query := `INSERT INTO jobs (job_id, video_id, s3_key, status, stage)
+	          VALUES (?, ?, ?, 'pending_upload', 'init')`
+
+	_, err := r.DB.ExecContext(ctx, query, jobID, videoID, s3Key)
+	if err != nil {
+		return "", err
+	}
+	return jobID, nil
+}
+
 func (r *JobRepository) GetJob(ctx context.Context, jobID string) (*models.Job, error) {
-	query := `SELECT video_id, status, stage FROM jobs WHERE job_id = ?`
+	query := `SELECT job_id, video_id, status, stage FROM jobs WHERE job_id = ?`
 
 	var job models.Job
 
 	err := r.DB.QueryRowContext(ctx, query, jobID).
-		Scan(&job.VideoID, &job.Status, &job.Stage)
+		Scan(&job.JobID, &job.VideoID, &job.Status, &job.Stage)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -68,8 +90,8 @@ func (r *JobRepository) GetAllJobs(ctx context.Context) ([]*models.Job, error) {
 	return jobs, nil
 }
 
-// used to push in sqs, so needs key therefore jobInternal
-func (r *JobRepository) GetJobsByStatus(ctx context.Context, status string, limit int) ([]*models.JobInternal, error) {
+// used to push in sqs, so needs key therefore Job
+func (r *JobRepository) GetJobsByStatus(ctx context.Context, status string, limit int) ([]*models.Job, error) {
 	query := `SELECT job_id, s3_key, video_id FROM jobs WHERE status = ? LIMIT ?`
 
 	rows, err := r.DB.QueryContext(ctx, query, status, limit)
@@ -78,9 +100,9 @@ func (r *JobRepository) GetJobsByStatus(ctx context.Context, status string, limi
 	}
 	defer rows.Close()
 
-	var jobs []*models.JobInternal
+	var jobs []*models.Job
 	for rows.Next() {
-		var j models.JobInternal
+		var j models.Job
 		err := rows.Scan(&j.JobID, &j.Key, &j.VideoID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan job row: %w", err)
@@ -106,25 +128,24 @@ func (r *JobRepository) UpdateJobStatus(ctx context.Context, jobID, status, stag
 	return nil
 }
 
-func (r *JobRepository) CreateJob(ctx context.Context, jobID string, data models.JobCreationRequest, key string) error {
-	query := `INSERT INTO jobs (job_id, video_id, s3_key, status, stage) 
-              VALUES (?, ?, ?, 'pending', 'creation')`
+func (r *JobRepository) GetJobByVideoID(ctx context.Context, videoID string) (*models.Job, error) {
+	query := `SELECT job_id, video_id, s3_key, status, stage FROM jobs WHERE video_id = ?`
 
-	_, err := r.DB.ExecContext(ctx, query, jobID, data.VideoID, key)
-	return err
-}
-
-func (r *JobRepository) GetS3KeyByVideoID(ctx context.Context, videoID string) (string, error) {
-	query := `SELECT s3_key FROM uploads WHERE video_id = ?`
-
-	var s3Key string
-	err := r.DB.QueryRowContext(ctx, query, videoID).Scan(&s3Key)
+	var job models.Job
+	err := r.DB.QueryRowContext(ctx, query, videoID).Scan(
+		&job.JobID, &job.VideoID, &job.Key, &job.Status, &job.Stage,
+	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("upload session not found for videoID: %s", videoID)
+			return nil, fmt.Errorf("no job found for videoID %s", videoID)
 		}
-		return "", err
+		return nil, err
 	}
+	return &job, nil
+}
 
-	return s3Key, nil
+func (r *JobRepository) UpdateJobStatusByVideoID(ctx context.Context, videoID, status, stage string) error {
+	query := `UPDATE jobs SET status = ?, stage = ? WHERE video_id = ?`
+	_, err := r.DB.ExecContext(ctx, query, status, stage, videoID)
+	return err
 }

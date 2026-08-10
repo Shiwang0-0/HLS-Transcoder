@@ -4,36 +4,31 @@ import { UploadModal } from "./components/Upload"
 import { VideoCard } from "./components/VideoCard"
 
 
-const ACTIVE_STATUSES = ["transcoding", "downloading", "uploading", "queued"]
+const ACTIVE_STATUSES = ["pending_upload", "uploaded", "queued", "downloading", "transcoding", "uploading"]
 
 export default function VideoFeed() {
   const [videos, setVideos] = useState([])
-  const [activeVideo, setActiveVideo] = useState(null)
+  const [activeVideoId, setActiveVideoId] = useState(null)
   const [filter, setFilter] = useState("all")
   const [loading, setLoading] = useState(true) 
   const [showUpload, setShowUpload] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
 
+  // derived — always in sync with `videos`, no effect needed to keep it fresh
+  const activeVideo = activeVideoId
+    ? (Array.isArray(videos) ? videos : []).find(v => v.jobID === activeVideoId) ?? null
+    : null
+
   useEffect(() => {
     let isMounted = true
-
     const fetchVideos = async () => {
       try {
         const res = await fetch("http://localhost:8000/api/jobs")
         if (!res.ok) throw new Error()
-
         const data = await res.json()
-         if (isMounted) {
+        if (isMounted) {
           const jobsList = data.jobs || data
           setVideos(jobsList)
-
-          // Keep the currently selected active video in sync if its status changes in the background
-          if (activeVideo) {
-            const freshActiveVideo = jobsList.find(v => v.jobID === activeVideo.jobID)
-            if (freshActiveVideo && freshActiveVideo.status !== activeVideo.status) {
-              setActiveVideo(freshActiveVideo)
-            }
-          }
         }
       } catch {
         if (isMounted) setVideos([])
@@ -41,22 +36,21 @@ export default function VideoFeed() {
         if (isMounted) setLoading(false)
       }
     }
-
     fetchVideos()
     return () => { isMounted = false }
-  }, [refreshKey,activeVideo])
+  }, [refreshKey])
 
   useEffect(() => {
     const safeVideos = Array.isArray(videos) ? videos : []
     const hasActiveJobs = safeVideos.some(v => ACTIVE_STATUSES.includes(v.status))
 
-    if (!hasActiveJobs) return // If no jobs are active, don't set up an interval timer
+    if (!hasActiveJobs) return
 
     const intervalId = setInterval(() => {
       setRefreshKey(prev => prev + 1)
     }, 3000)
 
-    return () => clearInterval(intervalId) // Clean up the timer when statuses change or component unmounts
+    return () => clearInterval(intervalId)
   }, [videos])
 
   const handleUploadComplete = () => {
@@ -123,8 +117,7 @@ export default function VideoFeed() {
                   {(activeVideo.videoName || "").replace(/\.(mp4|mov|avi|mkv)$/i, "")}
                 </span>
               </div>
-              <button
-                onClick={() => setActiveVideo(null)}
+              <button onClick={() => setActiveVideoId(null)}
                 className="bg-transparent border border-[#222] rounded text-[#666] cursor-pointer px-2 py-0.5 text-[11px] font-mono"
               >close</button>
             </div>
@@ -175,8 +168,8 @@ export default function VideoFeed() {
             {filtered.map(v => (
               <VideoCard
                 key={v.jobID} video={v}
-                isActive={activeVideo?.jobID === v.jobID}
-                onClick={setActiveVideo}
+                isActive={activeVideoId === v.jobID}
+                onClick={(video) => setActiveVideoId(video.jobID)}
               />
             ))}
           </div>

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
@@ -38,7 +40,42 @@ func (h *JobHandler) GetJob(c *fiber.Ctx) error {
 	return c.Status(200).JSON(response)
 }
 
-func (h *JobHandler) CreateTranscodingJob(c *fiber.Ctx) error {
+func (h *JobHandler) StreamJobStatus(c *fiber.Ctx) error {
+	jobID := c.Params("jobid")
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+
+	ctx := c.Context()
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		updates := h.JobService.WatchJob(ctx, jobID)
+
+		for update := range updates {
+			if update.Err != nil {
+				fmt.Fprintf(w, "event: error\ndata: %s\n\n", update.Err.Error())
+				w.Flush()
+				return
+			}
+
+			payload, _ := json.Marshal(fiber.Map{
+				"status": update.Status,
+				"stage":  update.Stage,
+			})
+			fmt.Fprintf(w, "data: %s\n\n", payload)
+
+			if err := w.Flush(); err != nil {
+				// client disconnected
+				// not context cancellation, so this is the actual disconnect signal
+				return
+			}
+		}
+	})
+
+	return nil
+
+}
+
+func (h *JobHandler) QueueTranscodingJob(c *fiber.Ctx) error {
 	response := fiber.Map{
 		"msg": "Service notified",
 	}
@@ -49,22 +86,22 @@ func (h *JobHandler) CreateTranscodingJob(c *fiber.Ctx) error {
 		return c.Status(400).JSON(response)
 	}
 
-	job, err := h.JobService.CreateTranscodingJob(c.Context(), data)
+	job, err := h.JobService.QueueTranscodingJob(c.Context(), data)
 	if err != nil {
-		response["msg"] = "Error creating job"
+		response["msg"] = err.Error()
+		return c.Status(409).JSON(response)
 	}
 
 	if err := h.JobService.UploadToSQS(c.Context(), job); err != nil {
-		// even if failed, return the job the retry go routine will eventually push to SQS
+		// even if failed, the retry goroutine will eventually push to SQS
+		fmt.Printf("Changing Job: %s status to failed_to_queue\n", job.JobID)
 		response["msg"] = "Video uploaded and queued for processing."
-		fmt.Printf("Changing Job: %s status to failed_to_queue", job.JobID)
-
-		response["job"] = job.ToPublic()
+		response["job"] = job
 		return c.Status(202).JSON(response)
 	}
 
-	response["job"] = job.ToPublic()
-
+	response["msg"] = "Video queued for processing."
+	response["job"] = job
 	return c.Status(200).JSON(response)
 }
 

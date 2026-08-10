@@ -33,13 +33,14 @@ func (s *UploadService) GeneratePresignedPartURL(ctx context.Context, data model
 	return s.S3Service.GeneratePresignedPartURL(ctx, data, session.Key, session.UploadID)
 }
 
-func (s *UploadService) InitMultipartUpload(ctx context.Context, data models.InitMultipartUploadRequest) (*models.UploadSessionInternal, error) {
+func (s *UploadService) InitMultipartUpload(ctx context.Context, data models.InitMultipartUploadRequest) (*models.UploadSession, error) {
 	uploadSession, err := s.UploadRepository.CheckAlreadyUploaded(ctx, data.Fingerprint)
 	if err != nil {
 		return nil, fmt.Errorf("db check failed: %w", err)
 	}
 
 	if uploadSession != nil {
+		uploadSession.IsNewSession = false
 		return uploadSession, nil // already UploadSessionInternal, return as-is
 	}
 
@@ -54,6 +55,7 @@ func (s *UploadService) InitMultipartUpload(ctx context.Context, data models.Ini
 		return nil, fmt.Errorf("db create session failed: %w", err)
 	}
 
+	uploadSession.IsNewSession = true
 	uploadSession.UploadedParts = []models.Part{}
 	return uploadSession, nil
 }
@@ -151,4 +153,8 @@ func (s *UploadService) CompleteMultipartUpload(ctx context.Context, data models
 	}
 
 	return nil
+}
+
+func (s *UploadService) GetSessionByID(ctx context.Context, sessionID int64) (*models.UploadSession, error) {
+	return s.UploadRepository.GetSessionByID(ctx, sessionID)
 }

@@ -8,12 +8,17 @@ import (
 
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/models"
 	"github.com/Shiwang0-0/HLS-Transcoder/server/internal/repository"
-	"github.com/google/uuid"
 )
 
 type JobService struct {
 	JobRepository *repository.JobRepository
 	SQSService    *SQSService
+}
+
+type JobStatusUpdate struct {
+	Status string
+	Stage  string
+	Err    error
 }
 
 func NewJobService(jobRepository *repository.JobRepository, sqsService *SQSService) *JobService {
@@ -33,10 +38,92 @@ func (s *JobService) GetJob(ctx context.Context, jobID string) (*models.Job, err
 	return job, err
 }
 
-// NotifyUploadToSQS updates job status in DB then pushes to SQS
-func (s *JobService) UploadToSQS(ctx context.Context, job *models.JobInternal) error {
+// WatchJob polls the DB until the job reaches a terminal state or ctx is cancelled,
+// emitting an update only when status/stage actually changes.
+func (s *JobService) WatchJob(ctx context.Context, jobID string) <-chan JobStatusUpdate {
+	updates := make(chan JobStatusUpdate)
 
-	if err := s.SQSService.PutInQueue(ctx, job); err != nil {
+	go func() {
+		defer close(updates)
+
+		// Recover from any panic in this goroutine so a single bad request
+		// can never take down the whole process — this is the critical fix.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC recovered in WatchJob for jobID %s: %v", jobID, r)
+				select {
+				case updates <- JobStatusUpdate{Err: fmt.Errorf("internal error watching job")}:
+				default:
+				}
+			}
+		}()
+
+		var lastStatus, lastStage string
+
+		// check() returns true if the loop should stop (terminal state or error)
+		check := func() bool {
+			job, err := s.GetJob(ctx, jobID)
+			if err != nil {
+				select {
+				case updates <- JobStatusUpdate{Err: err}:
+				case <-ctx.Done():
+				}
+				return true
+			}
+
+			if job == nil {
+				select {
+				case updates <- JobStatusUpdate{Err: fmt.Errorf("job %s not found", jobID)}:
+				case <-ctx.Done():
+				}
+				return true
+			}
+
+			if job.Status != lastStatus || job.Stage != lastStage {
+				lastStatus, lastStage = job.Status, job.Stage
+				select {
+				case updates <- JobStatusUpdate{Status: job.Status, Stage: job.Stage}:
+				case <-ctx.Done():
+					return true
+				}
+			}
+
+			return job.Status == "completed" || job.Status == "failed"
+		}
+
+		// immediate check on connect, don't make the client wait for the first tick
+		if check() {
+			return
+		}
+
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if check() {
+					return
+				}
+			}
+		}
+	}()
+
+	return updates
+}
+
+// NotifyUploadToSQS updates job status in DB then pushes to SQS
+func (s *JobService) UploadToSQS(ctx context.Context, job *models.Job) error {
+
+	msg := &models.JobMessage{
+		JobID:   job.JobID,
+		VideoID: job.VideoID,
+		Key:     job.Key,
+	}
+
+	if err := s.SQSService.PutInQueue(ctx, msg); err != nil {
 		dbErr := s.JobRepository.UpdateJobStatus(ctx, job.JobID, "failed_to_queue", "sqs_error")
 		if dbErr != nil {
 			log.Printf("CRITICAL: Failed to update DB to 'failed_to_queue' for JobID %s: %v", job.JobID, dbErr)
@@ -50,28 +137,29 @@ func (s *JobService) UploadToSQS(ctx context.Context, job *models.JobInternal) e
 	return nil
 }
 
-func (s *JobService) CreateTranscodingJob(ctx context.Context, data models.JobCreationRequest) (*models.JobInternal, error) {
-
-	jobID := uuid.New().String()
-
-	videoID := data.VideoID
-
-	s3Key, err := s.JobRepository.GetS3KeyByVideoID(ctx, videoID)
+func (s *JobService) QueueTranscodingJob(ctx context.Context, data models.JobCreationRequest) (*models.Job, error) {
+	job, err := s.JobRepository.GetJobByVideoID(ctx, data.VideoID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get s3 key: %w", err)
+		return nil, fmt.Errorf("failed to get job: %w", err)
 	}
 
-	err = s.JobRepository.CreateJob(ctx, jobID, data, s3Key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create job: %w", err)
+	if job.Status != "uploaded" {
+		return nil, fmt.Errorf("upload not completed for videoID %s (status: %s)", data.VideoID, job.Status)
 	}
 
-	job := &models.JobInternal{
-		JobID:   jobID,
-		VideoID: data.VideoID,
-		Key:     s3Key,
-	}
 	return job, nil
+}
+
+func (s *JobService) CreateJobShell(ctx context.Context, videoID, s3Key string) (string, error) {
+	return s.JobRepository.CreateJobShell(ctx, videoID, s3Key)
+}
+
+func (s *JobService) MarkUploaded(ctx context.Context, videoID string) error {
+	return s.JobRepository.UpdateJobStatusByVideoID(ctx, videoID, "uploaded", "s3_complete")
+}
+
+func (s *JobService) GetJobByVideoID(ctx context.Context, videoID string) (*models.Job, error) {
+	return s.JobRepository.GetJobByVideoID(ctx, videoID)
 }
 
 // send public job
